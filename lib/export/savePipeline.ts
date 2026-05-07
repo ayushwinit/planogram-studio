@@ -1,7 +1,8 @@
 "use client";
 import { toast } from "sonner";
 import { useEditorStore } from "../store/editorStore";
-import { useCatalogStore } from "../store/catalogStore";
+import { useCatalogStore, toEditorProduct } from "../store/catalogStore";
+import { savePlanogram } from "../planograms/actions";
 import { buildExport } from "./buildExport";
 import { captureStagePng } from "./exportImage";
 import { buildPdf } from "./exportPdf";
@@ -13,7 +14,60 @@ function getPlanogram() {
 
 function getCatalog() {
   const s = useCatalogStore.getState();
-  return { products: s.products, brands: s.brands };
+  return { products: s.products.map(toEditorProduct) };
+}
+
+/** Persist the current editor state to the database. Captures a PNG of the
+ *  outer shelf + uploads it as the preview. Resolves with the new slug so
+ *  callers can update the URL if the planogram name changed.
+ *
+ *  Returns null on failure (toast is already shown). */
+export async function saveToCloud(): Promise<{ planogramSlug: string; tenantSlug: string } | null> {
+  const state = useEditorStore.getState();
+  if (!state.planogramId) {
+    toast.error("This planogram is not bound to a saved row.");
+    return null;
+  }
+  if (!state.customerName.trim()) {
+    toast.error("Customer / Mart is required before saving.");
+    return null;
+  }
+  if (!state.planogram.name.trim()) {
+    toast.error("Planogram name is required.");
+    return null;
+  }
+
+  // PNG capture is best-effort — if the canvas is empty we still want the
+  // save to succeed and store the data so the user can come back to it.
+  let previewPng: string | undefined;
+  if (state.planogram.shelves.length > 0) {
+    try {
+      previewPng = await captureStagePng();
+    } catch (err) {
+      console.warn("preview capture failed", err);
+    }
+  }
+
+  const fd = new FormData();
+  fd.set("planogramId", state.planogramId);
+  fd.set("planogramName", state.planogram.name);
+  fd.set("customerName", state.customerName);
+  fd.set("planogramData", JSON.stringify(state.planogram));
+  if (previewPng) fd.set("previewPng", previewPng);
+
+  const res = await savePlanogram(fd);
+  if (!res.ok) {
+    toast.error(res.error);
+    return null;
+  }
+  useEditorStore.getState().markSaved(res.planogram.updatedAt, res.planogram.planogramSlug);
+  toast.success("Saved", {
+    description: `${res.planogram.shelvesCount} shelves · ${res.planogram.placementsCount} placements · ${res.planogram.unitsCount} units.`,
+  });
+  return {
+    planogramSlug: res.planogram.planogramSlug,
+    tenantSlug: res.planogram.tenantSlug,
+  };
 }
 
 export async function exportJson() {

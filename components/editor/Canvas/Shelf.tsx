@@ -1,7 +1,6 @@
 "use client";
 import * as React from "react";
 import { useDroppable } from "@dnd-kit/core";
-import { GripVertical, Move } from "lucide-react";
 import { useEditorStore } from "@/lib/store/editorStore";
 import { mmToPx, pxToMm } from "@/lib/units";
 import type { RowSlot, Shelf as ShelfModel, ShelfRow as ShelfRowModel } from "@/lib/types";
@@ -13,13 +12,12 @@ interface Props {
   shelf: ShelfModel;
 }
 
-const RAIL_WIDTH = 18;
-
 export function Shelf({ shelf }: Props) {
   const zoom = useEditorStore((s) => s.zoom);
   const select = useEditorStore((s) => s.select);
   const selection = useEditorStore((s) => s.selection);
   const updateShelf = useEditorStore((s) => s.updateShelf);
+  const setShelfTotalHeight = useEditorStore((s) => s.setShelfTotalHeight);
 
   const isSelected = selection.kind === "shelf" && selection.id === shelf.id;
   const totalHeightMm = shelfTotalHeightMm(shelf);
@@ -59,25 +57,49 @@ export function Shelf({ shelf }: Props) {
     window.addEventListener("pointerup", onUp);
   }
 
-  function startResizeWidth(e: React.PointerEvent, edge: "e" | "w") {
+  type ShelfHandle = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
+
+  function startResize(e: React.PointerEvent, edge: ShelfHandle) {
     e.preventDefault();
     e.stopPropagation();
     const startX = e.clientX;
+    const startY = e.clientY;
     const startW = shelf.widthMm;
+    const startH = totalHeightMm;
     const startXMm = shelf.xMm;
+    const startYMm = shelf.yMm;
+    const movesWestEdge = edge === "w" || edge === "nw" || edge === "sw";
+    const movesEastEdge = edge === "e" || edge === "ne" || edge === "se";
+    const movesNorthEdge = edge === "n" || edge === "ne" || edge === "nw";
+    const movesSouthEdge = edge === "s" || edge === "se" || edge === "sw";
+
     function onMove(ev: PointerEvent) {
       const dxMm = pxToMm(ev.clientX - startX, zoom);
-      const patch: Partial<ShelfModel> = {};
-      if (edge === "e") patch.widthMm = Math.max(1, startW + dxMm);
-      else {
-        patch.widthMm = Math.max(1, startW - dxMm);
-        patch.xMm = startXMm + dxMm;
+      const dyMm = pxToMm(ev.clientY - startY, zoom);
+
+      const widthPatch: Partial<ShelfModel> = {};
+      if (movesEastEdge) widthPatch.widthMm = Math.max(20, startW + dxMm);
+      if (movesWestEdge) {
+        widthPatch.widthMm = Math.max(20, startW - dxMm);
+        widthPatch.xMm = startXMm + dxMm;
       }
+
+      let nextHeightMm: number | null = null;
+      if (movesSouthEdge) nextHeightMm = Math.max(20, startH + dyMm);
+      if (movesNorthEdge) {
+        nextHeightMm = Math.max(20, startH - dyMm);
+        widthPatch.yMm = startYMm + dyMm;
+      }
+
       if (ev.shiftKey) {
-        if (patch.widthMm) patch.widthMm = Math.round(patch.widthMm / 10) * 10;
-        if (patch.xMm !== undefined) patch.xMm = Math.round(patch.xMm / 10) * 10;
+        if (widthPatch.widthMm) widthPatch.widthMm = Math.round(widthPatch.widthMm / 10) * 10;
+        if (widthPatch.xMm !== undefined) widthPatch.xMm = Math.round(widthPatch.xMm / 10) * 10;
+        if (widthPatch.yMm !== undefined) widthPatch.yMm = Math.round(widthPatch.yMm / 10) * 10;
+        if (nextHeightMm !== null) nextHeightMm = Math.round(nextHeightMm / 10) * 10;
       }
-      updateShelf(shelf.id, patch);
+
+      if (Object.keys(widthPatch).length > 0) updateShelf(shelf.id, widthPatch);
+      if (nextHeightMm !== null) setShelfTotalHeight(shelf.id, nextHeightMm);
     }
     function onUp() {
       window.removeEventListener("pointermove", onMove);
@@ -87,105 +109,119 @@ export function Shelf({ shelf }: Props) {
     window.addEventListener("pointerup", onUp);
   }
 
+  // The body uses content-box so the border surrounds the inner content (where
+  // rows live) without overlapping it on the right edge. The wrapper grows by
+  // 2*borderWidth on each axis so the resize handles still anchor to the
+  // visible outer edge.
+  const bw = shelf.borderWidthPx;
+  const wrapperWidthPx = widthPx + bw * 2;
+  const wrapperHeightPx = heightPx + bw * 2;
+
   return (
     <div
+      onPointerDown={(e) => {
+        // Anywhere on the wrapper that isn't a row/handle drags the shelf.
+        if (e.target !== e.currentTarget) return;
+        startMove(e);
+      }}
       onClick={(e) => {
         e.stopPropagation();
         select({ kind: "shelf", id: shelf.id });
       }}
       className={cn(
-        "absolute transition-shadow",
-        isSelected && "ring-2 ring-indigo-500"
+        "absolute cursor-grab active:cursor-grabbing transition-shadow"
       )}
       style={{
         left: xPx,
         top: yPx,
-        width: widthPx + RAIL_WIDTH, // include rail to the left
-        height: heightPx,
+        width: wrapperWidthPx,
+        height: wrapperHeightPx,
+        background: shelf.backgroundColor,
+        border: `${bw}px solid ${shelf.borderColor}`,
+        borderRadius: 4,
+        boxSizing: "content-box",
       }}
     >
-      {/* Left-rail drag handle (always visible). Sits flush with the shelf, easy to grab. */}
+      {/* Inline label badge — purely informational, never grabs events. */}
       <div
-        onPointerDown={startMove}
-        onClick={(e) => {
-          e.stopPropagation();
-          select({ kind: "shelf", id: shelf.id });
-        }}
-        className={cn(
-          "editor-only absolute top-0 bottom-0 left-0 flex flex-col items-center justify-center gap-1 select-none rounded-l-md cursor-grab active:cursor-grabbing transition-colors",
-          isSelected
-            ? "bg-indigo-500 text-white"
-            : "bg-slate-300 text-slate-600 hover:bg-slate-400 hover:text-white"
-        )}
-        style={{ width: RAIL_WIDTH }}
-        title="Drag to move shelf"
+        className="editor-only absolute -top-5 left-0 px-1.5 h-4 flex items-center text-[10px] font-medium text-slate-500 tabular-nums select-none pointer-events-none"
       >
-        <Move className="h-3.5 w-3.5" />
-        <GripVertical className="h-3 w-3 opacity-70" />
+        <span>{shelf.label ?? "Shelf unit"}</span>
+        <span className="opacity-60 ml-1">· {Math.round(shelf.widthMm)}mm</span>
       </div>
 
-      {/* Shelf body to the right of the rail */}
-      <div
-        onPointerDown={(e) => {
-          // Empty zones between rows / outside row widths drag the shelf.
-          if (e.target !== e.currentTarget) return;
-          startMove(e);
-        }}
-        className="absolute top-0 bottom-0 cursor-grab active:cursor-grabbing"
-        style={{
-          left: RAIL_WIDTH,
-          width: widthPx,
-          background: shelf.backgroundColor,
-          border: `${shelf.borderWidthPx}px solid ${shelf.borderColor}`,
-          borderRadius: 4,
-        }}
-      >
-        {/* Top tab handle for label/info, also draggable */}
+      {/* Top placement area */}
+      {shelf.topAreaMm > 0 ? (
+        <TopArea shelf={shelf} onShelfPointerDown={startMove} />
+      ) : null}
+
+      {/* Rows */}
+      {shelf.rows.map((row) => (
+        <Row key={row.id} shelf={shelf} row={row} onShelfPointerDown={startMove} />
+      ))}
+
+      {/* MS-Word-style 8 selection handles. */}
+      {isSelected ? (
+        <>
+          {/* edges */}
+          <div
+            onPointerDown={(e) => startResize(e, "w")}
+            onClick={(e) => e.stopPropagation()}
+            className="editor-only absolute top-1/2 -translate-y-1/2 h-6 w-2.5 rounded bg-white border border-indigo-500 shadow-sm hover:bg-indigo-50"
+            style={{ left: -6, cursor: "ew-resize" }}
+          />
+          <div
+            onPointerDown={(e) => startResize(e, "e")}
+            onClick={(e) => e.stopPropagation()}
+            className="editor-only absolute top-1/2 -translate-y-1/2 h-6 w-2.5 rounded bg-white border border-indigo-500 shadow-sm hover:bg-indigo-50"
+            style={{ right: -6, cursor: "ew-resize" }}
+          />
+          <div
+            onPointerDown={(e) => startResize(e, "n")}
+            onClick={(e) => e.stopPropagation()}
+            className="editor-only absolute left-1/2 -translate-x-1/2 h-2.5 w-6 rounded bg-white border border-indigo-500 shadow-sm hover:bg-indigo-50"
+            style={{ top: -6, cursor: "ns-resize" }}
+          />
+          <div
+            onPointerDown={(e) => startResize(e, "s")}
+            onClick={(e) => e.stopPropagation()}
+            className="editor-only absolute left-1/2 -translate-x-1/2 h-2.5 w-6 rounded bg-white border border-indigo-500 shadow-sm hover:bg-indigo-50"
+            style={{ bottom: -6, cursor: "ns-resize" }}
+          />
+          {/* corners */}
+          <div
+            onPointerDown={(e) => startResize(e, "nw")}
+            onClick={(e) => e.stopPropagation()}
+            className="editor-only absolute h-3 w-3 rounded-sm bg-white border border-indigo-500 shadow-sm hover:bg-indigo-50"
+            style={{ top: -6, left: -6, cursor: "nwse-resize" }}
+          />
+          <div
+            onPointerDown={(e) => startResize(e, "ne")}
+            onClick={(e) => e.stopPropagation()}
+            className="editor-only absolute h-3 w-3 rounded-sm bg-white border border-indigo-500 shadow-sm hover:bg-indigo-50"
+            style={{ top: -6, right: -6, cursor: "nesw-resize" }}
+          />
+          <div
+            onPointerDown={(e) => startResize(e, "sw")}
+            onClick={(e) => e.stopPropagation()}
+            className="editor-only absolute h-3 w-3 rounded-sm bg-white border border-indigo-500 shadow-sm hover:bg-indigo-50"
+            style={{ bottom: -6, left: -6, cursor: "nesw-resize" }}
+          />
+          <div
+            onPointerDown={(e) => startResize(e, "se")}
+            onClick={(e) => e.stopPropagation()}
+            className="editor-only absolute h-3 w-3 rounded-sm bg-white border border-indigo-500 shadow-sm hover:bg-indigo-50"
+            style={{ bottom: -6, right: -6, cursor: "nwse-resize" }}
+          />
+        </>
+      ) : null}
+
+      {/* Selection ring — drawn after handles so it sits behind them but on top of body. */}
+      {isSelected ? (
         <div
-          onPointerDown={startMove}
-          onClick={(e) => {
-            e.stopPropagation();
-            select({ kind: "shelf", id: shelf.id });
-          }}
-          className={cn(
-            "editor-only absolute -top-6 left-0 h-5 px-1.5 flex items-center gap-1 rounded-t-md text-[10px] font-medium tabular-nums select-none cursor-grab active:cursor-grabbing transition-colors",
-            isSelected ? "bg-indigo-500 text-white" : "bg-slate-200 text-slate-600 hover:bg-slate-300"
-          )}
-          title="Drag to move shelf"
-        >
-          <GripVertical className="h-3 w-3 -ml-0.5 opacity-80" />
-          <span>{shelf.label ?? `Shelf ${shelf.index + 1}`}</span>
-          <span className="opacity-60 ml-1">{Math.round(shelf.widthMm)}mm</span>
-        </div>
-
-        {/* Top placement area */}
-        {shelf.topAreaMm > 0 ? (
-          <TopArea shelf={shelf} onShelfPointerDown={startMove} />
-        ) : null}
-
-        {/* Rows */}
-        {shelf.rows.map((row) => (
-          <Row key={row.id} shelf={shelf} row={row} onShelfPointerDown={startMove} />
-        ))}
-
-        {/* Width resize handles */}
-        {isSelected ? (
-          <>
-            <div
-              onPointerDown={(e) => startResizeWidth(e, "w")}
-              onClick={(e) => e.stopPropagation()}
-              className="editor-only absolute top-1/2 -translate-y-1/2 h-6 w-2.5 rounded bg-white border border-indigo-500 shadow-sm hover:bg-indigo-50"
-              style={{ left: -6, cursor: "ew-resize" }}
-            />
-            <div
-              onPointerDown={(e) => startResizeWidth(e, "e")}
-              onClick={(e) => e.stopPropagation()}
-              className="editor-only absolute top-1/2 -translate-y-1/2 h-6 w-2.5 rounded bg-white border border-indigo-500 shadow-sm hover:bg-indigo-50"
-              style={{ right: -6, cursor: "ew-resize" }}
-            />
-          </>
-        ) : null}
-      </div>
+          className="absolute inset-0 pointer-events-none rounded ring-2 ring-indigo-500"
+        />
+      ) : null}
     </div>
   );
 }

@@ -13,6 +13,11 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Any non-disabled button gets a pointer cursor by default. */
+button:not(:disabled) {
+  cursor: pointer;
+}
+
 /* Hide selection rings during PNG export */
 [data-exporting="true"] .editor-only {
   display: none !important;

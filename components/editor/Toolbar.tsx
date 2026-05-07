@@ -1,130 +1,78 @@
 "use client";
 import * as React from "react";
-import {
-  LayoutDashboard,
-  Plus,
-  ZoomIn,
-  ZoomOut,
-  RotateCcw,
-  Save,
-  Image as ImageIcon,
-  FileText,
-  FileJson,
-  Trash2,
-} from "lucide-react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { LayoutDashboard, Building2, FolderOpen, Plus } from "lucide-react";
+import UserMenu from "@/components/auth/UserMenu";
 import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/DropdownMenu";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
-import { useEditorStore } from "@/lib/store/editorStore";
-import { saveAll, exportPng, exportJson, exportPdf } from "@/lib/export/savePipeline";
 
-export function Toolbar() {
-  const name = useEditorStore((s) => s.planogram.name);
-  const setName = useEditorStore((s) => s.setName);
-  const addShelf = useEditorStore((s) => s.addShelf);
-  const zoom = useEditorStore((s) => s.zoom);
-  const zoomIn = useEditorStore((s) => s.zoomIn);
-  const zoomOut = useEditorStore((s) => s.zoomOut);
-  const resetZoom = useEditorStore((s) => s.resetZoom);
-  const reset = useEditorStore((s) => s.reset);
+export type ToolbarUser = { name: string; email: string };
+export type ToolbarTenant = { name: string; logo: string | null };
+
+export function Toolbar({ user, tenant }: { user: ToolbarUser; tenant: ToolbarTenant }) {
+  const pathname = usePathname();
+  const onBrowse = pathname === "/editor/browse";
+  const onNew = pathname === "/editor/new";
 
   return (
     <header className="h-14 shrink-0 flex items-center gap-3 px-4 border-b border-slate-200 bg-white shadow-sm z-10">
-      <div className="flex items-center gap-2">
-        <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 grid place-items-center text-white shadow-sm">
+      <Link href="/editor/browse" className="flex items-center gap-2 group">
+        <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 grid place-items-center text-white shadow-sm group-hover:shadow-md transition-shadow">
           <LayoutDashboard className="h-4 w-4" />
         </div>
-        <div className="font-semibold text-slate-900 leading-none">Planogram <span className="text-indigo-600">Studio</span></div>
-      </div>
+        <div className="font-semibold text-slate-900 leading-none">
+          Planogram <span className="text-indigo-600">Studio</span>
+        </div>
+      </Link>
 
       <div className="h-6 w-px bg-slate-200 mx-1" />
 
-      <Input
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        className="max-w-xs h-8 text-sm font-medium"
-        placeholder="Planogram name"
-      />
-
-      <div className="h-6 w-px bg-slate-200 mx-1" />
-
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button size="sm" variant="primary" onClick={() => addShelf()} className="gap-1.5">
-            <Plus className="h-4 w-4" /> Add Shelf
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Add a new shelf row to the canvas</TooltipContent>
-      </Tooltip>
+      <TenantBadge name={tenant.name} logo={tenant.logo} />
 
       <div className="ml-auto flex items-center gap-2">
-        <div className="flex items-center gap-0.5 rounded-md border border-slate-200 bg-white">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button size="icon-sm" variant="ghost" onClick={zoomOut}>
-                <ZoomOut className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Zoom out</TooltipContent>
-          </Tooltip>
-          <button
-            onClick={resetZoom}
-            className="px-2 text-xs font-medium text-slate-700 tabular-nums hover:bg-slate-100 rounded"
-            title="Reset zoom"
-          >
-            {Math.round(zoom * 100)}%
-          </button>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button size="icon-sm" variant="ghost" onClick={zoomIn}>
-                <ZoomIn className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Zoom in</TooltipContent>
-          </Tooltip>
-        </div>
-
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button size="icon-sm" variant="ghost" onClick={() => { if (confirm("Reset planogram? This clears all shelves and placements.")) reset(); }}>
-              <Trash2 className="h-4 w-4 text-rose-500" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Reset planogram</TooltipContent>
-        </Tooltip>
-
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button size="sm" variant="default" className="gap-1.5">
-              <Save className="h-4 w-4" /> Save
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={saveAll}>
-              <Save className="h-4 w-4" /> Save All (PNG + PDF + JSON)
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={exportPng}>
-              <ImageIcon className="h-4 w-4" /> Export PNG
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={exportPdf}>
-              <FileText className="h-4 w-4" /> Export PDF
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={exportJson}>
-              <FileJson className="h-4 w-4" /> Export JSON
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {!onBrowse ? (
+          <Button asChild size="sm" variant="outline" className="gap-1.5">
+            <Link href="/editor/browse">
+              <FolderOpen className="h-4 w-4" /> Browse Planograms
+            </Link>
+          </Button>
+        ) : null}
+        {!onNew ? (
+          <Button asChild size="sm" variant="primary" className="gap-1.5">
+            <Link href="/editor/new">
+              <Plus className="h-4 w-4" /> New Planogram
+            </Link>
+          </Button>
+        ) : null}
+        <div className="h-6 w-px bg-slate-200 mx-1" />
+        <UserMenu name={user.name} email={user.email} />
       </div>
     </header>
   );
 }
 
-export { RotateCcw }; // unused but reserved for future
+function TenantBadge({ name, logo }: { name: string; logo: string | null }) {
+  const [imgFailed, setImgFailed] = React.useState(false);
+  const showImg = !!logo && !imgFailed;
+  return (
+    <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 pl-1.5 pr-2.5 py-1">
+      <div className="h-7 w-7 rounded-md bg-white border border-slate-200 grid place-items-center overflow-hidden">
+        {showImg ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={logo!}
+            alt={name}
+            className="h-full w-full object-contain"
+            onError={() => setImgFailed(true)}
+            draggable={false}
+          />
+        ) : (
+          <Building2 className="h-3.5 w-3.5 text-slate-400" />
+        )}
+      </div>
+      <span className="text-sm font-semibold uppercase tracking-wide text-slate-800 truncate max-w-[200px]">
+        {name}
+      </span>
+    </div>
+  );
+}

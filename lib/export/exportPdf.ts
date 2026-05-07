@@ -35,7 +35,7 @@ export function buildPdf(planogram: PlanogramExport, imageDataUrl: string): Blob
   const imgX = (pageW - imgW) / 2;
   try {
     pdf.addImage(imageDataUrl, "PNG", imgX, imgY, imgW, imgH, undefined, "FAST");
-  } catch (e) {
+  } catch {
     pdf.text("(Image failed to render)", margin, imgY + 10);
   }
 
@@ -71,7 +71,7 @@ export function buildPdf(planogram: PlanogramExport, imageDataUrl: string): Blob
         : `Grid ${arr.cols}×${arr.rows}`;
     const shelf = planogram.shelves.find((s) => s.id === p.shelfId);
     pdf.text(String(idx + 1), colX[0], y);
-    pdf.text(p.brand.name, colX[1], y);
+    pdf.text(p.product.brand, colX[1], y);
     pdf.text(truncate(p.product.name, 28), colX[2], y);
     pdf.text(truncate(shelf?.label ?? p.shelfId.slice(0, 6), 13), colX[3], y);
     pdf.text(String(p.totalUnits), colX[4], y);

@@ -1,20 +1,16 @@
-export interface Brand {
-  id: string;
-  name: string;
-  logoUrl: string;
-  color: string;
-}
-
+/**
+ * Product shape consumed by the editor (canvas / placements / arrangement maths).
+ * It is derived from a `TenantProduct` row by `lib/store/catalogStore.ts`.
+ */
 export interface Product {
   id: string;
-  brandId: string;
   name: string;
-  sku: string;
+  sku: string | null;
+  brand: string;
+  category: string;
   imageUrl: string;
   widthMm: number;
   heightMm: number;
-  depthMm: number;
-  category?: string;
 }
 
 export type ArrangementKind = "horizontal" | "stacked" | "grid";
@@ -35,6 +31,15 @@ export interface PlacedProduct {
   yMm: number; // Y offset from the row's bottom (0 = sitting on the row floor)
   arrangement: Arrangement;
   rotationDeg: 0 | 90 | 180 | 270;
+  /** Independent horizontal scale (default 1). Driven by E/W edge handles
+   *  and the X axis of corner handles. */
+  scaleX?: number;
+  /** Independent vertical scale (default 1). Driven by N/S edge handles
+   *  and the Y axis of corner handles. */
+  scaleY?: number;
+  /** Legacy uniform scale, kept for back-compat with previously stored
+   *  placements; falls back when scaleX/scaleY are absent. */
+  scale?: number;
   notes?: string;
 }
 
@@ -78,7 +83,6 @@ export interface Planogram {
 
 export interface ResolvedPlacement extends PlacedProduct {
   product: Product;
-  brand: Brand;
   absoluteXMm: number;
   absoluteYMm: number;
   boundingBoxMm: { x: number; y: number; w: number; h: number };

@@ -13,10 +13,12 @@ import {
   DragOverlay,
 } from "@dnd-kit/core";
 import type { RowSlot } from "@/lib/types";
+import type { TenantProduct } from "@/lib/catalog/types";
 import { useEditorStore } from "@/lib/store/editorStore";
 import { useCatalogStore } from "@/lib/store/catalogStore";
 import { defaultArrangement } from "@/lib/arrangement";
-import { Toolbar } from "./Toolbar";
+import { Toolbar, type ToolbarUser, type ToolbarTenant } from "./Toolbar";
+import { CanvasToolbar } from "./CanvasToolbar";
 import { LeftPanel } from "./LeftPanel/LeftPanel";
 import { Canvas } from "./Canvas/Canvas";
 import { RightPanel } from "./RightPanel/RightPanel";
@@ -24,9 +26,42 @@ import { PlaceProductModal, type PendingPlacement } from "./modals/PlaceProductM
 import { TooltipProvider } from "@/components/ui/Tooltip";
 import { ProductCardPreview } from "./LeftPanel/ProductCardPreview";
 
-export default function EditorShell() {
-  const setHydrated = useEditorStore((s) => s.setHydrated);
-  const hydrated = useEditorStore((s) => s.hydrated);
+export interface EditorBinding {
+  planogramId: string;
+  tenantSlug: string;
+  planogramSlug: string;
+  planogram: import("@/lib/types").Planogram;
+  customerName: string;
+  lastSavedAt: string;
+}
+
+export default function EditorShell({
+  user,
+  tenant,
+  initialProducts,
+  initialBinding,
+}: {
+  user: ToolbarUser;
+  tenant: ToolbarTenant;
+  initialProducts: TenantProduct[];
+  initialBinding: EditorBinding;
+}) {
+  const setProducts = useCatalogStore((s) => s.setProducts);
+  const hydrate = useEditorStore((s) => s.hydrate);
+
+  // Seed the catalog store from server-fetched products on mount, and again
+  // whenever the prop changes (e.g. after a router.refresh() following an edit).
+  React.useEffect(() => {
+    setProducts(initialProducts);
+  }, [initialProducts, setProducts]);
+
+  // Hydrate the editor store with the saved planogram. Re-hydrate when the
+  // bound planogramId changes (i.e. user navigated to a different one without
+  // a full page reload).
+  React.useEffect(() => {
+    hydrate(initialBinding);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialBinding.planogramId]);
   const addPlacement = useEditorStore((s) => s.addPlacement);
   const movePlacement = useEditorStore((s) => s.movePlacement);
   const placements = useEditorStore((s) => s.planogram.placements);
@@ -38,14 +73,6 @@ export default function EditorShell() {
   const setHoverDropTarget = useEditorStore((s) => s.setHoverDropTarget);
 
   const getProduct = useCatalogStore((s) => s.getProduct);
-
-  // Hydrate persisted store on mount only on client
-  React.useEffect(() => {
-    useEditorStore.persist
-      .rehydrate()
-      ?.then(() => setHydrated(true))
-      .catch(() => setHydrated(true));
-  }, [setHydrated]);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
@@ -131,7 +158,11 @@ export default function EditorShell() {
   }
 
   const removeRow = useEditorStore((s) => s.removeRow);
-  // Keyboard: Delete removes selection, Escape clears selection
+  const updatePlacement = useEditorStore((s) => s.updatePlacement);
+  // Keyboard:
+  //  - Escape clears selection
+  //  - Delete/Backspace removes the selection (placement / shelf / row)
+  //  - Arrow keys nudge the selected placement (1mm, or 10mm with Shift)
   React.useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const target = e.target as HTMLElement | null;
@@ -144,18 +175,32 @@ export default function EditorShell() {
         if (selection.kind === "shelf") removeShelf(selection.id);
         if (selection.kind === "row") removeRow(selection.shelfId, selection.id);
       }
+
+      if (selection.kind === "placement" && e.key.startsWith("Arrow")) {
+        const placement = useEditorStore
+          .getState()
+          .planogram.placements.find((p) => p.instanceId === selection.id);
+        if (!placement) return;
+        const step = e.shiftKey ? 10 : 1;
+        // y increases upwards (placement is positioned via `bottom: yMm` from
+        // the row floor), so ArrowUp adds to y and ArrowDown subtracts.
+        let dx = 0;
+        let dy = 0;
+        if (e.key === "ArrowLeft") dx = -step;
+        else if (e.key === "ArrowRight") dx = step;
+        else if (e.key === "ArrowUp") dy = step;
+        else if (e.key === "ArrowDown") dy = -step;
+        else return;
+        e.preventDefault();
+        updatePlacement(selection.id, {
+          xMm: Math.max(0, placement.xMm + dx),
+          yMm: Math.max(0, placement.yMm + dy),
+        });
+      }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selection, removePlacement, removeShelf, removeRow, select]);
-
-  if (!hydrated) {
-    return (
-      <div className="h-full w-full flex items-center justify-center text-slate-400 text-sm">
-        Loading editor…
-      </div>
-    );
-  }
+  }, [selection, removePlacement, removeShelf, removeRow, select, updatePlacement]);
 
   // For DragOverlay
   const activeProduct = activeDrag?.kind === "product" && activeDrag.productId
@@ -178,7 +223,7 @@ export default function EditorShell() {
         }}
       >
         <div className="h-full flex flex-col bg-slate-100">
-          <Toolbar />
+          <Toolbar user={user} tenant={tenant} />
           <div className="flex-1 min-h-0">
             <PanelGroup orientation="horizontal" className="h-full">
               <Panel id="left" defaultSize="20%" minSize="14%" maxSize="35%">
@@ -186,7 +231,12 @@ export default function EditorShell() {
               </Panel>
               <PanelResizeHandle className="resize-handle-h" />
               <Panel id="center" defaultSize="56%" minSize="30%">
-                <Canvas />
+                <div className="h-full flex flex-col">
+                  <CanvasToolbar />
+                  <div className="flex-1 min-h-0">
+                    <Canvas />
+                  </div>
+                </div>
               </Panel>
               <PanelResizeHandle className="resize-handle-h" />
               <Panel id="right" defaultSize="24%" minSize="16%" maxSize="36%">

@@ -1,24 +1,31 @@
 "use client";
 import * as React from "react";
 import { useDraggable } from "@dnd-kit/core";
-import type { Product } from "@/lib/types";
+import { Pencil, Image as ImageIcon } from "lucide-react";
+import type { TenantProduct } from "@/lib/catalog/types";
+import { brandAccentColor } from "@/lib/store/catalogStore";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
 import { cn } from "@/lib/cn";
 
 interface Props {
-  product: Product;
+  product: TenantProduct;
+  onEdit: () => void;
 }
 
-export function ProductCard({ product }: Props) {
+export function ProductCard({ product, onEdit }: Props) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
-    id: `product:${product.id}`,
-    data: { kind: "product", productId: product.id },
+    id: `product:${product.productId}`,
+    data: { kind: "product", productId: product.productId },
   });
+
+  const imageUrl = product.itemImageUrl ? `/api/catalog/image/${product.itemImageUrl}` : null;
+  const dims = product.itemDimensions;
+  const brandColor = brandAccentColor(product.brand);
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button
+        <div
           ref={setNodeRef}
           {...listeners}
           {...attributes}
@@ -28,24 +35,64 @@ export function ProductCard({ product }: Props) {
           )}
         >
           <div className="aspect-square w-full bg-slate-50 rounded-md grid place-items-center mb-1.5 overflow-hidden">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={product.imageUrl}
-              alt={product.name}
-              className="max-h-full max-w-full object-contain p-1.5 group-hover:scale-105 transition-transform"
-              draggable={false}
+            {imageUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={imageUrl}
+                alt={product.itemDescription}
+                className="max-h-full max-w-full object-contain p-1.5 group-hover:scale-105 transition-transform"
+                draggable={false}
+              />
+            ) : (
+              <ImageIcon className="h-6 w-6 text-slate-300" />
+            )}
+          </div>
+          <div className="text-[10px] text-slate-400 truncate">{product.category}</div>
+          <div className="flex items-center gap-1 mt-0.5">
+            <span
+              className="inline-block h-1.5 w-1.5 rounded-full shrink-0"
+              style={{ backgroundColor: brandColor }}
             />
+            <span className="text-[10px] text-slate-500 truncate">{product.brand}</span>
           </div>
-          <div className="text-[11px] font-medium text-slate-700 leading-tight line-clamp-2">
-            {product.name}
+          <div className="text-[11px] font-medium text-slate-700 leading-tight line-clamp-2 mt-0.5">
+            {product.itemDescription}
           </div>
-          <div className="text-[10px] text-slate-400 mt-0.5">{product.sku}</div>
-        </button>
+          {product.uom ? (
+            <div className="text-[10px] text-slate-400 mt-0.5 truncate">{product.uom}</div>
+          ) : null}
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onEdit();
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+            className="absolute top-1 right-1 p-1 rounded bg-white/90 border border-slate-200 text-slate-500 opacity-0 group-hover:opacity-100 hover:bg-slate-50 hover:text-slate-900 transition-opacity shadow-sm"
+            title="Edit product"
+            aria-label="Edit product"
+          >
+            <Pencil className="h-3 w-3" />
+          </button>
+        </div>
       </TooltipTrigger>
       <TooltipContent side="right">
         <div className="text-xs">
-          <div className="font-semibold">{product.name}</div>
-          <div className="opacity-80 mt-0.5">{product.widthMm}×{product.heightMm}×{product.depthMm}mm</div>
+          <div className="font-semibold">{product.itemDescription}</div>
+          <div className="opacity-80 mt-0.5">
+            {product.brand} · {product.category}
+            {product.uom ? ` · ${product.uom}` : ""}
+          </div>
+          {dims ? (
+            <div className="opacity-80 mt-0.5">
+              {dims.widthMm / 10}×{dims.heightMm / 10}
+              {dims.depthMm !== undefined ? `×${dims.depthMm / 10}` : ""}cm
+            </div>
+          ) : (
+            <div className="opacity-60 mt-0.5">No dimensions set</div>
+          )}
           <div className="opacity-60 mt-0.5">Drag onto a shelf to place</div>
         </div>
       </TooltipContent>

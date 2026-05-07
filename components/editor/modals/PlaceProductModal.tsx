@@ -11,7 +11,7 @@ import {
 import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/RadioGroup";
-import { useCatalogStore } from "@/lib/store/catalogStore";
+import { useCatalogStore, brandAccentColor, toEditorProduct } from "@/lib/store/catalogStore";
 import type { Arrangement, ArrangementKind } from "@/lib/types";
 import { arrangementMetrics } from "@/lib/arrangement";
 import { Rows3, Columns3, Grid3x3 } from "lucide-react";
@@ -34,8 +34,18 @@ interface Props {
 }
 
 export function PlaceProductModal({ pending, onClose, onConfirm }: Props) {
-  const product = useCatalogStore((s) => (pending ? s.getProduct(pending.productId) : undefined));
-  const brand = useCatalogStore((s) => (product ? s.getBrand(product.brandId) : undefined));
+  // Select the raw row (stable reference) and derive the editor-shape product
+  // locally. Calling `getProduct` directly inside the selector returned a fresh
+  // object on every render and looped useSyncExternalStore.
+  const rawProduct = useCatalogStore((s) =>
+    pending ? s.products.find((p) => p.productId === pending.productId) : undefined,
+  );
+  const product = React.useMemo(
+    () => (rawProduct ? toEditorProduct(rawProduct) : undefined),
+    [rawProduct],
+  );
+  const brandColor = product ? brandAccentColor(product.brand) : "#475569";
+  const brandName = product?.brand ?? "";
 
   const [kind, setKind] = React.useState<ArrangementKind>("horizontal");
   const [count, setCount] = React.useState<number>(4);
@@ -44,8 +54,13 @@ export function PlaceProductModal({ pending, onClose, onConfirm }: Props) {
   const [gap, setGap] = React.useState<number>(2);
   const [rotation, setRotation] = React.useState<0 | 90 | 180 | 270>(0);
 
-  // Reset form when a new pending opens
-  React.useEffect(() => {
+  // Reset form when a new pending opens — React's "Storing information from
+  // previous renders" pattern. The setter call during render schedules a single
+  // additional render before paint, no extra effect.
+  const pendingKey = pending ? `${pending.productId}:${pending.shelfId}:${pending.rowId}` : null;
+  const [lastPendingKey, setLastPendingKey] = React.useState<string | null>(null);
+  if (pendingKey !== lastPendingKey) {
+    setLastPendingKey(pendingKey);
     if (pending) {
       const a = pending.arrangement;
       setKind(a.kind);
@@ -57,7 +72,7 @@ export function PlaceProductModal({ pending, onClose, onConfirm }: Props) {
       setGap(a.gapMm ?? 2);
       setRotation(pending.rotationDeg);
     }
-  }, [pending]);
+  }
 
   if (!pending || !product) return null;
 
@@ -77,9 +92,9 @@ export function PlaceProductModal({ pending, onClose, onConfirm }: Props) {
           <div className="flex items-center gap-3">
             <div
               className="h-10 w-10 rounded-md grid place-items-center text-white text-xs font-bold shrink-0"
-              style={{ backgroundColor: brand?.color ?? "#475569" }}
+              style={{ backgroundColor: brandColor }}
             >
-              {brand?.name?.[0] ?? "?"}
+              {brandName[0]?.toUpperCase() ?? "?"}
             </div>
             <div>
               <DialogTitle>Place {product.name}</DialogTitle>

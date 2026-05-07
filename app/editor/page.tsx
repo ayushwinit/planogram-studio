@@ -1,5 +1,9 @@
-import EditorShell from "@/components/editor/EditorShell";
+import { redirect } from "next/navigation";
+import { requireSession } from "@/lib/auth/dal";
 
-export default function EditorPage() {
-  return <EditorShell />;
+// /editor is just a landing — push the user to the Browse list. They can
+// jump from there to "New Planogram" or click an existing one.
+export default async function EditorIndexPage() {
+  await requireSession();
+  redirect("/editor/browse");
 }

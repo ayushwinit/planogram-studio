@@ -1,15 +1,15 @@
-import type { Brand, Planogram, PlanogramExport, Product, ResolvedPlacement } from "../types";
+import type { Planogram, PlanogramExport, Product, ResolvedPlacement } from "../types";
 import { arrangementMetrics } from "../arrangement";
 import { BASE_PX_PER_MM } from "../units";
 import { rowTopOffsetMm, shelfTotalHeightMm } from "../shelfGeometry";
+import { computeCanvasSizeMm } from "../canvasBounds";
 
 export function buildExport(
   planogram: Planogram,
-  catalog: { products: Product[]; brands: Brand[] },
+  catalog: { products: Product[] },
   imageBase64?: string
 ): PlanogramExport {
   const productById = new Map(catalog.products.map((p) => [p.id, p]));
-  const brandById = new Map(catalog.brands.map((b) => [b.id, b]));
   const shelfById = new Map(planogram.shelves.map((s) => [s.id, s]));
 
   const resolvedPlacements: ResolvedPlacement[] = [];
@@ -17,15 +17,9 @@ export function buildExport(
     const product = productById.get(p.productId);
     const shelf = shelfById.get(p.shelfId);
     if (!product || !shelf) continue;
-    const brand = brandById.get(product.brandId);
-    if (!brand) continue;
     const metrics = arrangementMetrics(product, p.arrangement);
 
     // Compute absolute Y of the placement's TOP edge in canvas mm.
-    // - In a row: the row's bottom = shelf.yMm + (rowTopOffset + row.heightMm).
-    //   The placement's bottom sits at row.bottom - p.yMm; its top = bottom - placement.height.
-    // - On the top area: placements sit at shelf.yMm + topAreaMm - p.yMm (bottom),
-    //   so top = bottom - placement.height.
     let bottomYMm: number;
     if (p.rowId === "top") {
       bottomYMm = shelf.yMm + shelf.topAreaMm - p.yMm;
@@ -41,7 +35,6 @@ export function buildExport(
     resolvedPlacements.push({
       ...p,
       product,
-      brand,
       absoluteXMm,
       absoluteYMm: topYMm,
       boundingBoxMm: {
@@ -54,12 +47,16 @@ export function buildExport(
     });
   }
 
-  // Compute total shelf heights for the consumer's convenience (not stored on Shelf).
+  // Use the dynamically-derived bounds for the export so PDF aspect ratios
+  // and downstream consumers reflect the actual content area.
+  const { widthMm, heightMm } = computeCanvasSizeMm(planogram);
   const planogramWithDerived: Planogram = {
     ...planogram,
+    canvasWidthMm: widthMm,
+    canvasHeightMm: heightMm,
     shelves: planogram.shelves.map((s) => ({ ...s })),
   };
-  void shelfTotalHeightMm; // keep import; consumers can compute from rows
+  void shelfTotalHeightMm;
 
   return {
     ...planogramWithDerived,

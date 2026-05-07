@@ -1,7 +1,7 @@
 "use client";
 import * as React from "react";
 import { useEditorStore } from "@/lib/store/editorStore";
-import { useCatalogStore } from "@/lib/store/catalogStore";
+import { useCatalogStore, brandAccentColor, toEditorProduct } from "@/lib/store/catalogStore";
 import { Input, Textarea } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/RadioGroup";
@@ -13,12 +13,19 @@ import { arrangementMetrics } from "@/lib/arrangement";
 
 export function PlacementProperties({ placementId }: { placementId: string }) {
   const placement = useEditorStore((s) => s.planogram.placements.find((p) => p.instanceId === placementId));
-  const product = useCatalogStore((s) => (placement ? s.getProduct(placement.productId) : undefined));
-  const brand = useCatalogStore((s) => (product ? s.getBrand(product.brandId) : undefined));
+  // Stable raw row → memoized editor product (avoids snapshot loop).
+  const rawProduct = useCatalogStore((s) =>
+    placement ? s.products.find((p) => p.productId === placement.productId) : undefined,
+  );
+  const product = React.useMemo(
+    () => (rawProduct ? toEditorProduct(rawProduct) : undefined),
+    [rawProduct],
+  );
   const updatePlacement = useEditorStore((s) => s.updatePlacement);
   const removePlacement = useEditorStore((s) => s.removePlacement);
 
   if (!placement || !product) return null;
+  const brandColor = brandAccentColor(product.brand);
 
   const arr = placement.arrangement;
   const metrics = arrangementMetrics(product, arr);
@@ -58,10 +65,10 @@ export function PlacementProperties({ placementId }: { placementId: string }) {
           <div className="min-w-0">
             <div className="text-sm font-semibold text-slate-900 truncate">{product.name}</div>
             <div className="text-[11px] text-slate-500">
-              <span className="px-1.5 py-0.5 rounded text-white text-[10px] mr-1.5 align-middle" style={{ background: brand?.color }}>
-                {brand?.name}
+              <span className="px-1.5 py-0.5 rounded text-white text-[10px] mr-1.5 align-middle" style={{ background: brandColor }}>
+                {product.brand}
               </span>
-              {product.sku}
+              {product.sku ?? ""}
             </div>
           </div>
         </div>
