@@ -1,0 +1,99 @@
+export interface Brand {
+  id: string;
+  name: string;
+  logoUrl: string;
+  color: string;
+}
+
+export interface Product {
+  id: string;
+  brandId: string;
+  name: string;
+  sku: string;
+  imageUrl: string;
+  widthMm: number;
+  heightMm: number;
+  depthMm: number;
+  category?: string;
+}
+
+export type ArrangementKind = "horizontal" | "stacked" | "grid";
+
+export type Arrangement =
+  | { kind: "horizontal"; count: number; gapMm: number }
+  | { kind: "stacked"; count: number; gapMm: number }
+  | { kind: "grid"; cols: number; rows: number; gapMm: number };
+
+export type RowSlot = string | "top"; // "top" = placement on the top area of the shelf
+
+export interface PlacedProduct {
+  instanceId: string;
+  productId: string;
+  shelfId: string;
+  rowId: RowSlot;
+  xMm: number; // X within the row (left edge = 0)
+  yMm: number; // Y offset from the row's bottom (0 = sitting on the row floor)
+  arrangement: Arrangement;
+  rotationDeg: 0 | 90 | 180 | 270;
+  notes?: string;
+}
+
+export interface ShelfRow {
+  id: string;
+  index: number; // 0 = top row
+  xMm: number; // horizontal offset within the shelf
+  widthMm: number; // width of this row (can be less than shelf.widthMm)
+  heightMm: number;
+  borderWidthPx: number;
+  borderColor: string;
+  backgroundColor: string;
+  label?: string;
+}
+
+export interface Shelf {
+  id: string;
+  index: number;
+  xMm: number;
+  yMm: number;
+  widthMm: number;
+  topAreaMm: number; // height of the area on TOP of the shelf for placing products (0 = none)
+  rows: ShelfRow[];
+  borderWidthPx: number;
+  borderColor: string;
+  backgroundColor: string;
+  label?: string;
+}
+
+export interface Planogram {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  canvasWidthMm: number;
+  canvasHeightMm: number;
+  shelves: Shelf[];
+  placements: PlacedProduct[];
+  meta: { storeId?: string; aisle?: string; version: number };
+}
+
+export interface ResolvedPlacement extends PlacedProduct {
+  product: Product;
+  brand: Brand;
+  absoluteXMm: number;
+  absoluteYMm: number;
+  boundingBoxMm: { x: number; y: number; w: number; h: number };
+  totalUnits: number;
+}
+
+export interface PlanogramExport extends Planogram {
+  resolvedPlacements: ResolvedPlacement[];
+  exportedAt: string;
+  pixelsPerMm: number;
+  imageBase64?: string;
+}
+
+export type Selection =
+  | { kind: "shelf"; id: string }
+  | { kind: "row"; id: string; shelfId: string }
+  | { kind: "placement"; id: string }
+  | { kind: "none" };
