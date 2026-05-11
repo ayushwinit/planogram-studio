@@ -4,9 +4,18 @@ import { useEditorStore, MAX_INNER_SHELVES_LIMIT } from "@/lib/store/editorStore
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { Slider } from "@/components/ui/Slider";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@/components/ui/DropdownMenu";
 import { PropertyRow, PropertySection } from "./PropertyRow";
-import { ChevronDown, Layers, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, Copy, Layers, MoreVertical, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { ReplicateShelfModal } from "../modals/ReplicateShelfModal";
+import { toast } from "sonner";
 
 /** Always-visible list of inner shelves for the (single) outer shelf. */
 export function ShelvesList() {
@@ -16,10 +25,37 @@ export function ShelvesList() {
   const removeRow = useEditorStore((s) => s.removeRow);
   const select = useEditorStore((s) => s.select);
   const selection = useEditorStore((s) => s.selection);
+  const placements = useEditorStore((s) => s.planogram.placements);
+  const replicateRowContents = useEditorStore((s) => s.replicateRowContents);
+
+  const [replicateSourceRowId, setReplicateSourceRowId] = React.useState<string | null>(null);
 
   if (!shelf) return null;
   const shelfId = shelf.id;
   const innerAtMax = shelf.rows.length >= MAX_INNER_SHELVES_LIMIT;
+
+  function pullFrom(targetRowId: string, srcRowId: string, replace: boolean) {
+    if (!shelf) return;
+    if (replace) {
+      const existing = placements.filter((p) => p.shelfId === shelf.id && p.rowId === targetRowId);
+      if (existing.length > 0) {
+        // The replicateRowContents action handles the clear when replaceExisting=true,
+        // but we still want to be sure the user knows what happened.
+      }
+    }
+    const created = replicateRowContents({
+      srcShelfId: shelf.id,
+      srcRowId: srcRowId,
+      dstRowIds: [targetRowId],
+      mode: "exact",
+      replaceExisting: replace,
+    });
+    if (created === 0) {
+      toast.error("Source shelf is empty");
+    } else {
+      toast.success(`Copied ${created} placements from source shelf`);
+    }
+  }
 
   return (
     <PropertySection title={`Shelves (${shelf.rows.length} of ${MAX_INNER_SHELVES_LIMIT})`}>
@@ -36,6 +72,10 @@ export function ShelvesList() {
         {shelf.rows.map((row) => {
           const isRowSelected =
             selection.kind === "row" && selection.id === row.id;
+          const rowPlacementCount = placements.filter(
+            (p) => p.shelfId === shelf.id && p.rowId === row.id,
+          ).length;
+          const otherRows = shelf.rows.filter((r) => r.id !== row.id);
           return (
             <div
               key={row.id}
@@ -46,34 +86,56 @@ export function ShelvesList() {
                   : "border-slate-200 bg-white hover:border-slate-300"
               )}
             >
-              <button
-                type="button"
-                className="w-full flex items-center justify-between text-left"
-                onClick={() =>
-                  isRowSelected
-                    ? select({ kind: "none" })
-                    : select({ kind: "row", id: row.id, shelfId })
-                }
-                aria-expanded={isRowSelected}
-              >
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <Layers className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                  <span className="text-xs font-medium text-slate-700 truncate">
-                    {row.label}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <span className="text-[10px] text-slate-400 tabular-nums">
-                    {Math.round(row.heightMm)}mm
-                  </span>
-                  <ChevronDown
-                    className={cn(
-                      "h-3.5 w-3.5 text-slate-400 transition-transform",
-                      isRowSelected && "rotate-180"
-                    )}
-                  />
-                </div>
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  className="flex-1 flex items-center justify-between text-left min-w-0"
+                  onClick={() =>
+                    isRowSelected
+                      ? select({ kind: "none" })
+                      : select({ kind: "row", id: row.id, shelfId })
+                  }
+                  aria-expanded={isRowSelected}
+                >
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <Layers className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                    <span className="text-xs font-medium text-slate-700 truncate">
+                      {row.label}
+                    </span>
+                    {rowPlacementCount > 0 ? (
+                      <span className="text-[9px] tabular-nums text-slate-400 shrink-0">
+                        · {rowPlacementCount}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-[10px] text-slate-400 tabular-nums">
+                      {Math.round(row.heightMm)}mm
+                    </span>
+                    <ChevronDown
+                      className={cn(
+                        "h-3.5 w-3.5 text-slate-400 transition-transform",
+                        isRowSelected && "rotate-180"
+                      )}
+                    />
+                  </div>
+                </button>
+
+                <ShelfRowMenu
+                  hasOthers={otherRows.length > 0}
+                  otherRows={otherRows.map((r) => ({
+                    id: r.id,
+                    label: r.label ?? `Shelf ${r.index + 1}`,
+                    count: placements.filter(
+                      (p) => p.shelfId === shelf.id && p.rowId === r.id,
+                    ).length,
+                  }))}
+                  rowHasPlacements={rowPlacementCount > 0}
+                  onPullFrom={(srcId, replace) => pullFrom(row.id, srcId, replace)}
+                  onReplicate={() => setReplicateSourceRowId(row.id)}
+                />
+              </div>
+
               {isRowSelected ? (
                 <div className="space-y-2">
                   <PropertyRow label="Label">
@@ -144,7 +206,137 @@ export function ShelvesList() {
           );
         })}
       </div>
+
+      <ReplicateShelfModal
+        open={replicateSourceRowId !== null}
+        sourceRowId={replicateSourceRowId}
+        onClose={() => setReplicateSourceRowId(null)}
+      />
     </PropertySection>
+  );
+}
+
+/** Per-row "..." menu: pull contents from another shelf, or push this shelf
+ *  to many shelves via the replicate modal. */
+function ShelfRowMenu({
+  hasOthers,
+  otherRows,
+  rowHasPlacements,
+  onPullFrom,
+  onReplicate,
+}: {
+  hasOthers: boolean;
+  otherRows: { id: string; label: string; count: number }[];
+  rowHasPlacements: boolean;
+  onPullFrom: (srcRowId: string, replace: boolean) => void;
+  onReplicate: () => void;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const [copyFromOpen, setCopyFromOpen] = React.useState(false);
+
+  // The two-step "Copy from → which shelf?" flow is implemented as a second
+  // dropdown so we don't need a Radix submenu primitive in this codebase.
+  if (copyFromOpen) {
+    return (
+      <DropdownMenu
+        open
+        onOpenChange={(o) => {
+          if (!o) setCopyFromOpen(false);
+        }}
+      >
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label="Copy from another shelf"
+            className="h-7 w-7 grid place-items-center rounded text-slate-500 hover:bg-slate-100"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Copy className="h-3.5 w-3.5" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-[12rem]">
+          <div className="px-2 py-1 text-[10px] uppercase tracking-wider font-semibold text-slate-400">
+            Copy contents from
+          </div>
+          {otherRows.length === 0 ? (
+            <div className="px-2 py-1.5 text-xs text-slate-500">No other shelves</div>
+          ) : (
+            otherRows
+              .filter((r) => r.count > 0)
+              .map((r) => (
+                <DropdownMenuItem
+                  key={r.id}
+                  onSelect={() => {
+                    setCopyFromOpen(false);
+                    if (rowHasPlacements) {
+                      const replace = confirm(
+                        `This shelf already has products. Replace them with “${r.label}” contents?\n\nOK = Replace · Cancel = Keep both (merge)`,
+                      );
+                      onPullFrom(r.id, replace);
+                    } else {
+                      onPullFrom(r.id, false);
+                    }
+                  }}
+                >
+                  <span className="flex-1 truncate">{r.label}</span>
+                  <span className="text-[10px] tabular-nums text-slate-400">{r.count}</span>
+                </DropdownMenuItem>
+              ))
+          )}
+          {otherRows.every((r) => r.count === 0) ? (
+            <div className="px-2 py-1.5 text-[11px] text-slate-400">
+              Other shelves are empty
+            </div>
+          ) : null}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  }
+
+  return (
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label="Shelf actions"
+          className="h-7 w-7 grid place-items-center rounded text-slate-500 hover:bg-slate-100"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <MoreVertical className="h-3.5 w-3.5" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-[12rem]">
+        <DropdownMenuItem
+          disabled={!hasOthers}
+          onSelect={(e) => {
+            e.preventDefault();
+            setOpen(false);
+            setCopyFromOpen(true);
+          }}
+        >
+          <Copy className="h-3.5 w-3.5" />
+          <span className="flex-1">Copy from…</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!hasOthers || !rowHasPlacements}
+          onSelect={() => {
+            setOpen(false);
+            onReplicate();
+          }}
+        >
+          <Layers className="h-3.5 w-3.5" />
+          <span className="flex-1">Replicate to…</span>
+        </DropdownMenuItem>
+        {!rowHasPlacements ? (
+          <>
+            <DropdownMenuSeparator />
+            <div className="px-2 py-1 text-[10px] text-slate-400">
+              Add products first to replicate this shelf
+            </div>
+          </>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

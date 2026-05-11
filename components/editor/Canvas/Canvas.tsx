@@ -3,6 +3,8 @@ import * as React from "react";
 import { LayoutGrid } from "lucide-react";
 import { useEditorStore } from "@/lib/store/editorStore";
 import { Shelf } from "./Shelf";
+import { ClipboardChip } from "./ClipboardChip";
+import { MarqueeOverlay } from "./MarqueeOverlay";
 
 const ZOOM_PER_WHEEL_TICK = 0.0015;
 const GRID_SIZE_BASE_PX = 24;
@@ -11,6 +13,7 @@ const GRID_SIZE_BASE_PX = 24;
  * Infinite, fixed-viewport canvas — n8n / React Flow style.
  *  • Wheel  -> zoom anchored at cursor
  *  • Drag empty space -> pan
+ *  • Shift+drag empty space -> marquee-select placements
  *  • Shelves live in world (mm) space; the world wrapper is translated, not scaled.
  *
  * We deliberately avoid CSS `scale()` because dnd-kit, the shelf pointer-drag
@@ -24,8 +27,10 @@ export function Canvas() {
   const panX = useEditorStore((s) => s.panX);
   const panY = useEditorStore((s) => s.panY);
   const select = useEditorStore((s) => s.select);
+  const selectPlacements = useEditorStore((s) => s.selectPlacements);
   const zoomAt = useEditorStore((s) => s.zoomAt);
   const panBy = useEditorStore((s) => s.panBy);
+  const setMarquee = useEditorStore((s) => s.setMarquee);
 
   const viewportRef = React.useRef<HTMLDivElement | null>(null);
   const [isPanning, setIsPanning] = React.useState(false);
@@ -60,35 +65,64 @@ export function Canvas() {
     return () => vp.removeEventListener("wheel", onNativeWheel);
   }, []);
 
-  // Click/drag on empty space -> pan. We only start a pan when the pointer
-  // came down on the viewport background itself — clicks on shelves bubble up
-  // separately and run their own selection/drag handlers.
+  // Click/drag on empty space -> pan, OR shift-drag -> marquee-select.
+  // We only enter either mode if the pointer came down on the viewport
+  // background itself; clicks on shelves bubble up separately.
   function handlePointerDown(e: React.PointerEvent) {
     if (e.button !== 0 && e.button !== 1) return;
     if (e.target !== e.currentTarget) return;
     e.preventDefault();
     e.stopPropagation();
+
+    const vp = viewportRef.current;
+    if (!vp) return;
+    const vpRect = vp.getBoundingClientRect();
+    const startVpX = e.clientX - vpRect.left;
+    const startVpY = e.clientY - vpRect.top;
+    const isMarquee = e.shiftKey;
+
     const startX = e.clientX;
     const startY = e.clientY;
     let lastX = startX;
     let lastY = startY;
     let didDrag = false;
+
     function onMove(ev: PointerEvent) {
-      const dx = ev.clientX - lastX;
-      const dy = ev.clientY - lastY;
       if (!didDrag && Math.hypot(ev.clientX - startX, ev.clientY - startY) < 3) return;
-      if (!didDrag) setIsPanning(true);
-      didDrag = true;
-      lastX = ev.clientX;
-      lastY = ev.clientY;
-      panBy(dx, dy);
+      if (!didDrag) {
+        didDrag = true;
+        if (!isMarquee) setIsPanning(true);
+      }
+      if (isMarquee) {
+        const curVpX = ev.clientX - vpRect.left;
+        const curVpY = ev.clientY - vpRect.top;
+        setMarquee({ startX: startVpX, startY: startVpY, curX: curVpX, curY: curVpY });
+      } else {
+        const dx = ev.clientX - lastX;
+        const dy = ev.clientY - lastY;
+        lastX = ev.clientX;
+        lastY = ev.clientY;
+        panBy(dx, dy);
+      }
     }
+
     function onUp() {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      if (isMarquee && didDrag) {
+        const m = useEditorStore.getState().marquee;
+        if (m) {
+          const ids = placementsInMarquee(m);
+          selectPlacements(ids);
+        }
+        setMarquee(null);
+      } else if (!didDrag) {
+        // Plain click on empty space — clear selection.
+        select({ kind: "none" });
+      }
       setIsPanning(false);
-      if (didDrag) select({ kind: "none" });
     }
+
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
   }
@@ -101,10 +135,6 @@ export function Canvas() {
       }`}
       onWheel={handleWheel}
       onPointerDown={handlePointerDown}
-      onClick={(e) => {
-        if (e.target !== e.currentTarget) return;
-        select({ kind: "none" });
-      }}
       style={{
         backgroundColor: "#f1f5f9",
         // Dotted grid that pans and zooms with the world.
@@ -133,6 +163,9 @@ export function Canvas() {
         ))}
       </div>
 
+      <MarqueeOverlay />
+      <ClipboardChip />
+
       {planogram.shelves.length === 0 ? (
         <div className="absolute inset-0 grid place-items-center text-slate-400 text-sm pointer-events-none">
           <div className="flex flex-col items-center gap-2">
@@ -148,4 +181,29 @@ export function Canvas() {
       ) : null}
     </div>
   );
+}
+
+/** Resolve the placements whose bounding box (in viewport-space px) intersects
+ *  the marquee rect. We hit-test by DOM rects rather than recomputing the
+ *  shelf→row→placement transform in JS — Canvas, Row, and PlacedProductView
+ *  already lay everything out absolutely so getBoundingClientRect is exact. */
+function placementsInMarquee(m: NonNullable<ReturnType<typeof useEditorStore.getState>["marquee"]>): string[] {
+  const vp = document.getElementById("planogram-stage")?.parentElement;
+  if (!vp) return [];
+  const vpRect = vp.getBoundingClientRect();
+  // Marquee is stored in viewport-local coords; translate to client coords
+  // for direct comparison against placement bounding rects.
+  const rx1 = vpRect.left + Math.min(m.startX, m.curX);
+  const ry1 = vpRect.top + Math.min(m.startY, m.curY);
+  const rx2 = vpRect.left + Math.max(m.startX, m.curX);
+  const ry2 = vpRect.top + Math.max(m.startY, m.curY);
+  const nodes = document.querySelectorAll<HTMLElement>("[data-placement-id]");
+  const ids: string[] = [];
+  nodes.forEach((node) => {
+    const r = node.getBoundingClientRect();
+    if (r.right < rx1 || r.left > rx2 || r.bottom < ry1 || r.top > ry2) return;
+    const id = node.dataset.placementId;
+    if (id) ids.push(id);
+  });
+  return ids;
 }

@@ -4,12 +4,15 @@ import { nanoid } from "nanoid";
 import type {
   Arrangement,
   Planogram,
+  PlacementSnapshot,
   RowSlot,
   Selection,
   Shelf,
   ShelfRow,
   PlacedProduct,
 } from "../types";
+import { arrangementMetrics } from "../arrangement";
+import { useCatalogStore, toEditorProduct } from "./catalogStore";
 
 // Canvas size is dynamic and derived from the shelf bounding box at render time
 // (see `computeCanvasSizeMm`). Defaults below only seed the persisted Planogram
@@ -77,6 +80,18 @@ function markEdit(s: { planogram: Planogram; dirtySinceSave: boolean }) {
   s.dirtySinceSave = true;
 }
 
+/** Horizontal footprint of a placement in mm, factoring arrangement + scaleX.
+ *  Used by mirror-replication to flip the LEFT edge correctly: the new x =
+ *  rowWidth - oldX - footprint. Falls back to 0 if the product is missing. */
+function footprintWidthMm(p: Pick<PlacedProduct, "productId" | "arrangement" | "scaleX" | "scale">): number {
+  const raw = useCatalogStore.getState().products.find((x) => x.productId === p.productId);
+  if (!raw) return 0;
+  const product = toEditorProduct(raw);
+  const metrics = arrangementMetrics(product, p.arrangement);
+  const sx = p.scaleX ?? p.scale ?? 1;
+  return metrics.totalWidthMm * sx;
+}
+
 interface HydrateInput {
   planogram: Planogram;
   planogramId: string;
@@ -84,6 +99,23 @@ interface HydrateInput {
   planogramSlug: string;
   customerName: string;
   lastSavedAt: string;
+}
+
+/** Right-click context menu anchor + targets. The menu component watches this
+ *  field and renders an absolutely-positioned popup at (x, y). */
+export interface ContextMenuState {
+  /** Anchor coords in viewport (clientX, clientY) — the menu is portaled to
+   *  the document body and positioned via fixed coords. */
+  x: number;
+  y: number;
+  /** Placements the menu acts on. For single right-click this is `[id]`. For
+   *  right-click on an already multi-selected placement it's the full set. */
+  placementIds: string[];
+}
+
+interface ClipboardState {
+  entries: PlacementSnapshot[];
+  capturedAt: string;
 }
 
 interface EditorState {
@@ -98,6 +130,13 @@ interface EditorState {
   lastSavedAt: string | null;
 
   selection: Selection;
+  /** Live marquee rectangle in viewport (screen) pixel coords. Rendered by
+   *  the Canvas overlay; cleared on pointerup. */
+  marquee: { startX: number; startY: number; curX: number; curY: number } | null;
+  /** Persistent clipboard. Survives selection changes so a single copy can
+   *  be pasted many times. */
+  clipboard: ClipboardState | null;
+  contextMenu: ContextMenuState | null;
   zoom: number;
   panX: number;
   panY: number;
@@ -121,7 +160,16 @@ interface EditorState {
   resetView: () => void;
 
   select: (s: Selection) => void;
+  /** Replace placement selection with the given ids. Empty array → clear. */
+  selectPlacements: (ids: string[]) => void;
+  /** Add or remove a single placement from the current placement selection
+   *  (additive shift-click behaviour). Switches to placement-kind selection
+   *  if it wasn't one already. */
+  togglePlacementSelection: (id: string) => void;
   setHoverDropTarget: (t: { shelfId: string; rowId: RowSlot } | null) => void;
+  setMarquee: (m: EditorState["marquee"]) => void;
+  openContextMenu: (m: ContextMenuState) => void;
+  closeContextMenu: () => void;
 
   /** Create the single outer shelf with `innerCount` horizontal inner shelves.
    *  No-op if an outer shelf already exists (use `addInnerShelf` to grow it). */
@@ -151,6 +199,37 @@ interface EditorState {
     target: { shelfId: string; rowId: RowSlot; xMm: number; yMm: number }
   ) => void;
   removePlacement: (id: string) => void;
+  /** Bulk delete — used by multi-select Delete. */
+  removePlacements: (ids: string[]) => void;
+
+  /** Snapshot the currently selected placements into the clipboard. Returns
+   *  the number of entries captured (0 if no placement selection). */
+  copySelectionToClipboard: () => number;
+  /** Clear the clipboard. */
+  clearClipboard: () => void;
+  /** Paste clipboard entries into (shelfId, rowId) anchored at (xMm, yMm).
+   *  Multiple entries preserve their original relative offsets. Newly created
+   *  placements become the selection. Returns created instanceIds. */
+  pasteClipboardTo: (target: {
+    shelfId: string;
+    rowId: RowSlot;
+    xMm: number;
+    yMm: number;
+  }) => string[];
+  /** Duplicate the current placement selection in place with an offset (mm).
+   *  Equivalent to copy + paste at +offset, without touching the clipboard. */
+  duplicateSelection: (offsetMm?: { dxMm: number; dyMm: number }) => string[];
+  /** Replicate all placements from one inner shelf (row) onto one or more
+   *  other inner shelves of the same outer shelf. */
+  replicateRowContents: (input: {
+    srcShelfId: string;
+    srcRowId: RowSlot;
+    dstRowIds: string[];
+    mode: "exact" | "mirror" | "fillEmpty";
+    /** If true, existing placements in dst rows are removed first (only
+     *  applies when mode !== "fillEmpty"). */
+    replaceExisting: boolean;
+  }) => number;
 
   reset: () => void;
 }
@@ -166,6 +245,9 @@ export const useEditorStore = create<EditorState>()(
     lastSavedAt: null,
 
     selection: { kind: "none" },
+    marquee: null,
+    clipboard: null,
+    contextMenu: null,
     zoom: DEFAULT_ZOOM,
     panX: 80,
     panY: 80,
@@ -263,9 +345,49 @@ export const useEditorStore = create<EditorState>()(
         s.selection = sel;
       }),
 
+    selectPlacements: (ids) =>
+      set((s) => {
+        if (ids.length === 0) {
+          s.selection = { kind: "none" };
+        } else {
+          s.selection = { kind: "placement", ids: [...ids] };
+        }
+      }),
+
+    togglePlacementSelection: (id) =>
+      set((s) => {
+        if (s.selection.kind !== "placement") {
+          s.selection = { kind: "placement", ids: [id] };
+          return;
+        }
+        const set = new Set(s.selection.ids);
+        if (set.has(id)) set.delete(id);
+        else set.add(id);
+        if (set.size === 0) {
+          s.selection = { kind: "none" };
+        } else {
+          s.selection = { kind: "placement", ids: [...set] };
+        }
+      }),
+
     setHoverDropTarget: (t) =>
       set((s) => {
         s.hoverDropTarget = t;
+      }),
+
+    setMarquee: (m) =>
+      set((s) => {
+        s.marquee = m;
+      }),
+
+    openContextMenu: (m) =>
+      set((s) => {
+        s.contextMenu = m;
+      }),
+
+    closeContextMenu: () =>
+      set((s) => {
+        s.contextMenu = null;
       }),
 
     createShelfUnit: (innerCount) => {
@@ -405,7 +527,7 @@ export const useEditorStore = create<EditorState>()(
           rotationDeg,
         });
         markEdit(s);
-        s.selection = { kind: "placement", id: instanceId };
+        s.selection = { kind: "placement", ids: [instanceId] };
       });
       return instanceId;
     },
@@ -435,10 +557,176 @@ export const useEditorStore = create<EditorState>()(
       set((s) => {
         s.planogram.placements = s.planogram.placements.filter((p) => p.instanceId !== id);
         markEdit(s);
-        if (s.selection.kind === "placement" && s.selection.id === id) {
-          s.selection = { kind: "none" };
+        if (s.selection.kind === "placement") {
+          const next = s.selection.ids.filter((i) => i !== id);
+          s.selection = next.length === 0 ? { kind: "none" } : { kind: "placement", ids: next };
         }
       }),
+
+    removePlacements: (ids) =>
+      set((s) => {
+        if (ids.length === 0) return;
+        const ban = new Set(ids);
+        s.planogram.placements = s.planogram.placements.filter((p) => !ban.has(p.instanceId));
+        markEdit(s);
+        if (s.selection.kind === "placement") {
+          const next = s.selection.ids.filter((i) => !ban.has(i));
+          s.selection = next.length === 0 ? { kind: "none" } : { kind: "placement", ids: next };
+        }
+      }),
+
+    copySelectionToClipboard: () => {
+      const state = get();
+      if (state.selection.kind !== "placement" || state.selection.ids.length === 0) return 0;
+      const idSet = new Set(state.selection.ids);
+      const selected = state.planogram.placements.filter((p) => idSet.has(p.instanceId));
+      if (selected.length === 0) return 0;
+      // Bounding box of selected placements in (xMm, yMm) row-local space.
+      // yMm is measured from the row floor going up, so "bottom" = min(yMm).
+      // When the selection spans multiple rows we ignore that dimension —
+      // paste squashes the relative y positions into the target row anyway.
+      const minX = Math.min(...selected.map((p) => p.xMm));
+      const minY = Math.min(...selected.map((p) => p.yMm));
+      const shelfById = new Map(state.planogram.shelves.map((sh) => [sh.id, sh] as const));
+      const entries: PlacementSnapshot[] = selected.map((p) => {
+        const shelf = shelfById.get(p.shelfId);
+        const row = shelf?.rows.find((r) => r.id === p.rowId);
+        const rowWidthMm =
+          p.rowId === "top" ? shelf?.widthMm ?? 0 : row?.widthMm ?? shelf?.widthMm ?? 0;
+        return {
+          productId: p.productId,
+          arrangement: p.arrangement,
+          rotationDeg: p.rotationDeg,
+          scaleX: p.scaleX,
+          scaleY: p.scaleY,
+          scale: p.scale,
+          notes: p.notes,
+          relXMm: p.xMm - minX,
+          relYMm: p.yMm - minY,
+          srcRowWidthMm: rowWidthMm,
+        };
+      });
+      set((s) => {
+        s.clipboard = { entries, capturedAt: new Date().toISOString() };
+      });
+      return entries.length;
+    },
+
+    clearClipboard: () =>
+      set((s) => {
+        s.clipboard = null;
+      }),
+
+    pasteClipboardTo: (target) => {
+      const state = get();
+      const clip = state.clipboard;
+      if (!clip || clip.entries.length === 0) return [];
+      const newIds: string[] = [];
+      set((s) => {
+        for (const entry of clip.entries) {
+          const instanceId = nanoid();
+          newIds.push(instanceId);
+          s.planogram.placements.push({
+            instanceId,
+            productId: entry.productId,
+            shelfId: target.shelfId,
+            rowId: target.rowId,
+            xMm: Math.max(0, target.xMm + entry.relXMm),
+            yMm: Math.max(0, target.yMm + entry.relYMm),
+            arrangement: entry.arrangement,
+            rotationDeg: entry.rotationDeg,
+            scaleX: entry.scaleX,
+            scaleY: entry.scaleY,
+            scale: entry.scale,
+            notes: entry.notes,
+          });
+        }
+        markEdit(s);
+        s.selection = { kind: "placement", ids: newIds };
+      });
+      return newIds;
+    },
+
+    duplicateSelection: (offset) => {
+      const state = get();
+      if (state.selection.kind !== "placement" || state.selection.ids.length === 0) return [];
+      const idSet = new Set(state.selection.ids);
+      const selected = state.planogram.placements.filter((p) => idSet.has(p.instanceId));
+      if (selected.length === 0) return [];
+      const dxMm = offset?.dxMm ?? 20;
+      const dyMm = offset?.dyMm ?? 0;
+      const newIds: string[] = [];
+      set((s) => {
+        for (const src of selected) {
+          const instanceId = nanoid();
+          newIds.push(instanceId);
+          s.planogram.placements.push({
+            ...src,
+            instanceId,
+            xMm: Math.max(0, src.xMm + dxMm),
+            yMm: Math.max(0, src.yMm + dyMm),
+          });
+        }
+        markEdit(s);
+        s.selection = { kind: "placement", ids: newIds };
+      });
+      return newIds;
+    },
+
+    replicateRowContents: ({ srcShelfId, srcRowId, dstRowIds, mode, replaceExisting }) => {
+      const state = get();
+      const shelf = state.planogram.shelves.find((sh) => sh.id === srcShelfId);
+      if (!shelf) return 0;
+      const srcWidthMm =
+        srcRowId === "top"
+          ? shelf.widthMm
+          : shelf.rows.find((r) => r.id === srcRowId)?.widthMm ?? shelf.widthMm;
+      const srcPlacements = state.planogram.placements.filter(
+        (p) => p.shelfId === srcShelfId && p.rowId === srcRowId
+      );
+      if (srcPlacements.length === 0 || dstRowIds.length === 0) return 0;
+
+      let created = 0;
+      set((s) => {
+        for (const dstRowId of dstRowIds) {
+          if (dstRowId === srcRowId) continue;
+          const dstRow = shelf.rows.find((r) => r.id === dstRowId);
+          const dstWidthMm =
+            dstRowId === "top" ? shelf.widthMm : dstRow?.widthMm ?? shelf.widthMm;
+          const ratio = srcWidthMm > 0 ? dstWidthMm / srcWidthMm : 1;
+
+          const existing = s.planogram.placements.filter(
+            (p) => p.shelfId === srcShelfId && p.rowId === dstRowId
+          );
+          if (mode !== "fillEmpty" && replaceExisting && existing.length > 0) {
+            s.planogram.placements = s.planogram.placements.filter(
+              (p) => !(p.shelfId === srcShelfId && p.rowId === dstRowId)
+            );
+          } else if (mode === "fillEmpty" && existing.length > 0) {
+            // Skip rows that already have anything.
+            continue;
+          }
+
+          for (const src of srcPlacements) {
+            const scaledX = src.xMm * ratio;
+            const newX =
+              mode === "mirror"
+                ? Math.max(0, dstWidthMm - scaledX - footprintWidthMm(src) * ratio)
+                : scaledX;
+            s.planogram.placements.push({
+              ...src,
+              instanceId: nanoid(),
+              shelfId: srcShelfId,
+              rowId: dstRowId,
+              xMm: Math.max(0, newX),
+            });
+            created += 1;
+          }
+        }
+        markEdit(s);
+      });
+      return created;
+    },
 
     reset: () =>
       set((s) => {

@@ -20,6 +20,8 @@ export function PlacedProductView({ placement }: Props) {
   const select = useEditorStore((s) => s.select);
   const selection = useEditorStore((s) => s.selection);
   const updatePlacement = useEditorStore((s) => s.updatePlacement);
+  const togglePlacementSelection = useEditorStore((s) => s.togglePlacementSelection);
+  const openContextMenu = useEditorStore((s) => s.openContextMenu);
   // Select the raw row (stable ref) and derive the editor-shape product
   // locally — `getProduct` returns a fresh object and would loop the snapshot.
   const rawProduct = useCatalogStore((s) =>
@@ -53,7 +55,12 @@ export function PlacedProductView({ placement }: Props) {
   const xPx = mmToPx(xMm, zoom);
   const bottomPx = mmToPx(yMm, zoom);
 
-  const isSelected = selection.kind === "placement" && selection.id === placement.instanceId;
+  const isSelected =
+    selection.kind === "placement" && selection.ids.includes(placement.instanceId);
+  const isPrimarySelected =
+    selection.kind === "placement" &&
+    selection.ids.length === 1 &&
+    selection.ids[0] === placement.instanceId;
 
   const cellWPx = mmToPx(metrics.cellWidthMm, zoom) * scaleX;
   const cellHPx = mmToPx(metrics.cellHeightMm, zoom) * scaleY;
@@ -125,15 +132,37 @@ export function PlacedProductView({ placement }: Props) {
         setNodeRef(node);
         containerRef.current = node;
       }}
+      data-placement-id={placement.instanceId}
       {...listeners}
       {...attributes}
       onClick={(e) => {
         e.stopPropagation();
-        select({ kind: "placement", id: placement.instanceId });
+        const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+        if (additive) {
+          togglePlacementSelection(placement.instanceId);
+        } else {
+          select({ kind: "placement", ids: [placement.instanceId] });
+        }
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        // If the right-clicked placement is already part of the selection,
+        // keep the whole selection as the menu's targets. Otherwise make
+        // this placement the single new selection.
+        const currentIds =
+          selection.kind === "placement" && selection.ids.includes(placement.instanceId)
+            ? selection.ids
+            : [placement.instanceId];
+        if (!(selection.kind === "placement" && selection.ids.includes(placement.instanceId))) {
+          select({ kind: "placement", ids: [placement.instanceId] });
+        }
+        openContextMenu({ x: e.clientX, y: e.clientY, placementIds: currentIds });
       }}
       className={cn(
         "absolute group cursor-grab active:cursor-grabbing transition-shadow",
         isSelected && "outline-2 outline outline-indigo-500 outline-offset-2 rounded-sm",
+        isSelected && !isPrimarySelected && "outline-dashed",
         isDragging && "opacity-30"
       )}
       style={{
@@ -160,7 +189,7 @@ export function PlacedProductView({ placement }: Props) {
         ×{metrics.totalUnits}
       </div>
 
-      {isSelected ? (
+      {isPrimarySelected ? (
         <>
           {/* edges */}
           <EdgeHandle position="n" onPointerDown={(e) => startScale(e, "n")} />

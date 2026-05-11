@@ -20,6 +20,7 @@ import { ShelfProperties } from "./ShelfProperties";
 import { PlacementProperties } from "./PlacementProperties";
 import { CanvasProperties } from "./CanvasProperties";
 import { ShelvesList } from "./ShelvesList";
+import { MultiSelectionProperties } from "./MultiSelectionProperties";
 
 export function RightPanel() {
   const router = useRouter();
@@ -37,9 +38,12 @@ export function RightPanel() {
   const [saving, setSaving] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
 
+  const isMulti = selection.kind === "placement" && selection.ids.length > 1;
   const sectionTitle =
     selection.kind === "shelf" || selection.kind === "row"
       ? "Shelf Properties"
+      : isMulti
+      ? `Selection (${selection.kind === "placement" ? selection.ids.length : 0})`
       : selection.kind === "placement"
       ? "Placement Properties"
       : "Planogram";
@@ -203,8 +207,10 @@ export function RightPanel() {
 
         {selection.kind === "shelf" ? (
           <ShelfProperties shelfId={selection.id} />
-        ) : selection.kind === "placement" ? (
-          <PlacementProperties placementId={selection.id} />
+        ) : selection.kind === "placement" && selection.ids.length > 1 ? (
+          <MultiSelectionProperties ids={selection.ids} />
+        ) : selection.kind === "placement" && selection.ids.length === 1 ? (
+          <PlacementProperties placementId={selection.ids[0]} />
         ) : selection.kind === "row" ? null : (
           <CanvasProperties />
         )}

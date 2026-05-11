@@ -99,5 +99,24 @@ export interface PlanogramExport extends Planogram {
 export type Selection =
   | { kind: "shelf"; id: string }
   | { kind: "row"; id: string; shelfId: string }
-  | { kind: "placement"; id: string }
+  | { kind: "placement"; ids: string[] }
   | { kind: "none" };
+
+/** Snapshot of a placement suitable for clipboard / replication. Strips identity
+ *  + absolute position so the entry can be cloned to any (shelfId, rowId, x, y). */
+export interface PlacementSnapshot {
+  productId: string;
+  arrangement: Arrangement;
+  rotationDeg: 0 | 90 | 180 | 270;
+  scaleX?: number;
+  scaleY?: number;
+  scale?: number;
+  notes?: string;
+  /** Offset from the source selection's bounding-box left (mm). */
+  relXMm: number;
+  /** Offset from the source selection's bounding-box bottom (mm). */
+  relYMm: number;
+  /** Width of the source row the entry came from — used by smart paste to
+   *  decide whether to refuse / scale when target row is narrower. */
+  srcRowWidthMm: number;
+}

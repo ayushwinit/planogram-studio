@@ -25,6 +25,8 @@ import { RightPanel } from "./RightPanel/RightPanel";
 import { PlaceProductModal, type PendingPlacement } from "./modals/PlaceProductModal";
 import { TooltipProvider } from "@/components/ui/Tooltip";
 import { ProductCardPreview } from "./LeftPanel/ProductCardPreview";
+import { toast } from "sonner";
+import { PlacementContextMenu } from "./Canvas/PlacementContextMenu";
 
 export interface EditorBinding {
   planogramId: string;
@@ -66,7 +68,6 @@ export default function EditorShell({
   const movePlacement = useEditorStore((s) => s.movePlacement);
   const placements = useEditorStore((s) => s.planogram.placements);
   const select = useEditorStore((s) => s.select);
-  const removePlacement = useEditorStore((s) => s.removePlacement);
   const removeShelf = useEditorStore((s) => s.removeShelf);
   const selection = useEditorStore((s) => s.selection);
   const zoom = useEditorStore((s) => s.zoom);
@@ -81,6 +82,8 @@ export default function EditorShell({
     kind: "product" | "placement";
     productId?: string;
     placementId?: string;
+    /** Held Alt at the start of the drag → clone instead of move on drop. */
+    duplicate?: boolean;
   } | null>(null);
 
   function handleDragStart(e: DragStartEvent) {
@@ -89,9 +92,15 @@ export default function EditorShell({
       | { kind: "placement"; placementId: string }
       | undefined;
     if (!data) return;
-    setActiveDrag(data.kind === "product"
-      ? { kind: "product", productId: data.productId }
-      : { kind: "placement", placementId: data.placementId });
+    // Read modifier off the originating pointer event so Alt-drag-to-clone
+    // works without us having to track key state ourselves.
+    const activator = e.activatorEvent as PointerEvent | undefined;
+    const duplicate = !!activator?.altKey;
+    setActiveDrag(
+      data.kind === "product"
+        ? { kind: "product", productId: data.productId }
+        : { kind: "placement", placementId: data.placementId, duplicate },
+    );
   }
 
   function handleDragOver(e: DragOverEvent) {
@@ -148,39 +157,129 @@ export default function EditorShell({
         rotationDeg: 0,
       });
     } else {
-      movePlacement(activeData.placementId, {
-        shelfId: overData.shelfId,
-        rowId: overData.rowId,
-        xMm,
-        yMm,
-      });
+      const wantDuplicate =
+        activeDrag?.kind === "placement" && activeDrag.duplicate === true;
+      if (wantDuplicate) {
+        const src = placements.find((p) => p.instanceId === activeData.placementId);
+        if (src) {
+          useEditorStore.getState().addPlacement({
+            productId: src.productId,
+            shelfId: overData.shelfId,
+            rowId: overData.rowId,
+            xMm,
+            yMm,
+            arrangement: src.arrangement,
+            rotationDeg: src.rotationDeg,
+          });
+          // Carry over scale/notes that addPlacement doesn't accept directly.
+          const newest = useEditorStore.getState().planogram.placements.slice(-1)[0];
+          if (newest) {
+            useEditorStore.getState().updatePlacement(newest.instanceId, {
+              scaleX: src.scaleX,
+              scaleY: src.scaleY,
+              scale: src.scale,
+              notes: src.notes,
+            });
+          }
+        }
+      } else {
+        movePlacement(activeData.placementId, {
+          shelfId: overData.shelfId,
+          rowId: overData.rowId,
+          xMm,
+          yMm,
+        });
+      }
     }
   }
 
   const removeRow = useEditorStore((s) => s.removeRow);
+  const removePlacements = useEditorStore((s) => s.removePlacements);
   const updatePlacement = useEditorStore((s) => s.updatePlacement);
+  const copySelectionToClipboard = useEditorStore((s) => s.copySelectionToClipboard);
+  const pasteClipboardTo = useEditorStore((s) => s.pasteClipboardTo);
+  const duplicateSelection = useEditorStore((s) => s.duplicateSelection);
+  const clipboard = useEditorStore((s) => s.clipboard);
+  const closeContextMenu = useEditorStore((s) => s.closeContextMenu);
+
   // Keyboard:
-  //  - Escape clears selection
+  //  - Escape clears selection / context menu
   //  - Delete/Backspace removes the selection (placement / shelf / row)
-  //  - Arrow keys nudge the selected placement (1mm, or 10mm with Shift)
+  //  - Arrow keys nudge the selected placement(s) (1mm, or 10mm with Shift)
+  //  - Ctrl/Cmd+C copy, Ctrl/Cmd+V paste, Ctrl/Cmd+D duplicate
   React.useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
         return;
       }
-      if (e.key === "Escape") select({ kind: "none" });
+      if (e.key === "Escape") {
+        closeContextMenu();
+        select({ kind: "none" });
+        return;
+      }
+
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && !e.shiftKey && !e.altKey && (e.key === "c" || e.key === "C")) {
+        if (selection.kind === "placement" && selection.ids.length > 0) {
+          const n = copySelectionToClipboard();
+          if (n > 0) {
+            toast.success(`Copied ${n} ${n === 1 ? "item" : "items"}`);
+            e.preventDefault();
+          }
+        }
+        return;
+      }
+      if (mod && !e.shiftKey && !e.altKey && (e.key === "v" || e.key === "V")) {
+        if (!clipboard || clipboard.entries.length === 0) return;
+        // Paste anchor: drop into the row that currently holds the selection
+        // (if any), 20mm right of the first selected placement; else into
+        // the first available row of the shelf, near the left edge.
+        const state = useEditorStore.getState();
+        const placements = state.planogram.placements;
+        let target: { shelfId: string; rowId: RowSlot; xMm: number; yMm: number } | null = null;
+        const stateSel = state.selection;
+        if (stateSel.kind === "placement" && stateSel.ids.length > 0) {
+          const anchorId = stateSel.ids[0];
+          const anchor = placements.find((p) => p.instanceId === anchorId);
+          if (anchor) target = { shelfId: anchor.shelfId, rowId: anchor.rowId, xMm: anchor.xMm + 20, yMm: anchor.yMm };
+        }
+        if (!target) {
+          const shelf = state.planogram.shelves[0];
+          if (!shelf) return;
+          const row = shelf.rows[0];
+          if (!row) return;
+          target = { shelfId: shelf.id, rowId: row.id, xMm: 20, yMm: 0 };
+        }
+        const created = pasteClipboardTo(target);
+        if (created.length > 0) {
+          toast.success(`Pasted ${created.length} ${created.length === 1 ? "item" : "items"}`);
+          e.preventDefault();
+        }
+        return;
+      }
+      if (mod && !e.shiftKey && !e.altKey && (e.key === "d" || e.key === "D")) {
+        if (selection.kind === "placement" && selection.ids.length > 0) {
+          const ids = duplicateSelection({ dxMm: 20, dyMm: 0 });
+          if (ids.length > 0) {
+            toast.success(`Duplicated ${ids.length} ${ids.length === 1 ? "item" : "items"}`);
+            e.preventDefault();
+          }
+        }
+        return;
+      }
+
       if ((e.key === "Delete" || e.key === "Backspace") && selection.kind !== "none") {
-        if (selection.kind === "placement") removePlacement(selection.id);
+        if (selection.kind === "placement") removePlacements(selection.ids);
         if (selection.kind === "shelf") removeShelf(selection.id);
         if (selection.kind === "row") removeRow(selection.shelfId, selection.id);
       }
 
       if (selection.kind === "placement" && e.key.startsWith("Arrow")) {
-        const placement = useEditorStore
-          .getState()
-          .planogram.placements.find((p) => p.instanceId === selection.id);
-        if (!placement) return;
+        const placements = useEditorStore.getState().planogram.placements;
+        const idSet = new Set(selection.ids);
+        const targets = placements.filter((p) => idSet.has(p.instanceId));
+        if (targets.length === 0) return;
         const step = e.shiftKey ? 10 : 1;
         // y increases upwards (placement is positioned via `bottom: yMm` from
         // the row floor), so ArrowUp adds to y and ArrowDown subtracts.
@@ -192,15 +291,29 @@ export default function EditorShell({
         else if (e.key === "ArrowDown") dy = -step;
         else return;
         e.preventDefault();
-        updatePlacement(selection.id, {
-          xMm: Math.max(0, placement.xMm + dx),
-          yMm: Math.max(0, placement.yMm + dy),
-        });
+        for (const p of targets) {
+          updatePlacement(p.instanceId, {
+            xMm: Math.max(0, p.xMm + dx),
+            yMm: Math.max(0, p.yMm + dy),
+          });
+        }
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selection, removePlacement, removeShelf, removeRow, select, updatePlacement]);
+  }, [
+    selection,
+    clipboard,
+    removePlacements,
+    removeShelf,
+    removeRow,
+    select,
+    updatePlacement,
+    copySelectionToClipboard,
+    pasteClipboardTo,
+    duplicateSelection,
+    closeContextMenu,
+  ]);
 
   // For DragOverlay
   const activeProduct = activeDrag?.kind === "product" && activeDrag.productId
@@ -280,6 +393,8 @@ export default function EditorShell({
             setPending(null);
           }}
         />
+
+        <PlacementContextMenu />
       </DndContext>
     </TooltipProvider>
   );
