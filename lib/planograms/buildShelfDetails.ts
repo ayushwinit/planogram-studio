@@ -58,10 +58,13 @@ export function buildShelfDetailsAndStats(
   for (const shelf of args.planogram.shelves) {
     rowsCount += shelf.rows.length;
 
+    // Inner shelves always end up with a user-readable label in the DB —
+    // even if the row.label slot is empty for any reason, we default to the
+    // 1-based "Shelf N" so downstream consumers never see a bare nanoid.
     const rows: ShelfDetailRow[] = shelf.rows.map((row) => ({
       rowId: row.id,
       index: row.index,
-      label: row.label ?? null,
+      label: row.label && row.label.trim().length > 0 ? row.label : `Shelf ${row.index + 1}`,
       xMm: row.xMm,
       widthMm: row.widthMm,
       heightMm: row.heightMm,

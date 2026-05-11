@@ -42,7 +42,9 @@ export interface ShelfDetailPlacement {
 export interface ShelfDetailRow {
   rowId: string;
   index: number;
-  label: string | null;
+  /** Always populated. Defaults to `"Shelf N"` (1-based) when the editor's
+   *  row.label slot is empty, so downstream consumers never see a bare id. */
+  label: string;
   xMm: number;
   widthMm: number;
   heightMm: number;
