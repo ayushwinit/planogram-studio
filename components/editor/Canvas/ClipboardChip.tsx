@@ -65,7 +65,7 @@ export function ClipboardChip() {
             {productName}
           </span>
           <span className="text-[9px] text-slate-400 tabular-nums">
-            {extra > 0 ? `+${extra} more` : "1 item"} on clipboard
+            {extra > 0 ? `+${extra} more` : "1 item"} · click a shelf, then Paste
           </span>
         </div>
         <button

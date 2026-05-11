@@ -12,14 +12,22 @@ import { toast } from "sonner";
  *  Per-placement properties (arrangement, position, etc.) are hidden because
  *  applying them across heterogenous placements is ambiguous. */
 export function MultiSelectionProperties({ ids }: { ids: string[] }) {
-  const placements = useEditorStore((s) =>
-    s.planogram.placements.filter((p) => ids.includes(p.instanceId)),
-  );
+  // IMPORTANT: subscribe to the raw placements array (stable reference between
+  // store updates) and derive the filtered subset in useMemo. Returning a
+  // freshly-filtered array from the Zustand selector breaks under React 19's
+  // useSyncExternalStore equality check ("getSnapshot should be cached"),
+  // which crashes the page on every multi-select click.
+  const allPlacements = useEditorStore((s) => s.planogram.placements);
   const products = useCatalogStore((s) => s.products);
   const copySelectionToClipboard = useEditorStore((s) => s.copySelectionToClipboard);
   const duplicateSelection = useEditorStore((s) => s.duplicateSelection);
   const removePlacements = useEditorStore((s) => s.removePlacements);
   const togglePlacementSelection = useEditorStore((s) => s.togglePlacementSelection);
+
+  const placements = React.useMemo(() => {
+    const set = new Set(ids);
+    return allPlacements.filter((p) => set.has(p.instanceId));
+  }, [allPlacements, ids]);
 
   // Count duplicates by product so the list reads naturally for typical
   // shelf compositions (e.g. "Coca-Cola 330ml × 6").

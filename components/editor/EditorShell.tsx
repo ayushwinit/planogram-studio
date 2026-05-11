@@ -221,20 +221,23 @@ export default function EditorShell({
 
       const mod = e.metaKey || e.ctrlKey;
       if (mod && !e.shiftKey && !e.altKey && (e.key === "c" || e.key === "C")) {
+        // Always preventDefault so the browser's "copy selected text" doesn't
+        // race the action and so the toast feedback feels deterministic.
+        e.preventDefault();
         if (selection.kind === "placement" && selection.ids.length > 0) {
           const n = copySelectionToClipboard();
-          if (n > 0) {
-            toast.success(`Copied ${n} ${n === 1 ? "item" : "items"}`);
-            e.preventDefault();
-          }
+          if (n > 0) toast.success(`Copied ${n} ${n === 1 ? "item" : "items"}`);
         }
         return;
       }
       if (mod && !e.shiftKey && !e.altKey && (e.key === "v" || e.key === "V")) {
+        e.preventDefault();
         if (!clipboard || clipboard.entries.length === 0) return;
-        // Paste anchor: drop into the row that currently holds the selection
-        // (if any), 20mm right of the first selected placement; else into
-        // the first available row of the shelf, near the left edge.
+        // Paste anchor priority:
+        //  1. A selected placement → drop into ITS row, 20mm right of it
+        //  2. A selected row (user clicked the target shelf in the panel) →
+        //     drop into that row, 20mm from the left
+        //  3. Fallback → first row of the shelf
         const state = useEditorStore.getState();
         const placements = state.planogram.placements;
         let target: { shelfId: string; rowId: RowSlot; xMm: number; yMm: number } | null = null;
@@ -243,6 +246,8 @@ export default function EditorShell({
           const anchorId = stateSel.ids[0];
           const anchor = placements.find((p) => p.instanceId === anchorId);
           if (anchor) target = { shelfId: anchor.shelfId, rowId: anchor.rowId, xMm: anchor.xMm + 20, yMm: anchor.yMm };
+        } else if (stateSel.kind === "row") {
+          target = { shelfId: stateSel.shelfId, rowId: stateSel.id, xMm: 20, yMm: 0 };
         }
         if (!target) {
           const shelf = state.planogram.shelves[0];
@@ -254,16 +259,18 @@ export default function EditorShell({
         const created = pasteClipboardTo(target);
         if (created.length > 0) {
           toast.success(`Pasted ${created.length} ${created.length === 1 ? "item" : "items"}`);
-          e.preventDefault();
         }
         return;
       }
       if (mod && !e.shiftKey && !e.altKey && (e.key === "d" || e.key === "D")) {
+        // Ctrl+D is "Bookmark this page" in browsers — always preventDefault so
+        // the bookmark dialog doesn't pop up and steal focus, even if there's
+        // nothing to duplicate.
+        e.preventDefault();
         if (selection.kind === "placement" && selection.ids.length > 0) {
           const ids = duplicateSelection({ dxMm: 20, dyMm: 0 });
           if (ids.length > 0) {
             toast.success(`Duplicated ${ids.length} ${ids.length === 1 ? "item" : "items"}`);
-            e.preventDefault();
           }
         }
         return;

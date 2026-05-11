@@ -360,13 +360,13 @@ export const useEditorStore = create<EditorState>()(
           s.selection = { kind: "placement", ids: [id] };
           return;
         }
-        const set = new Set(s.selection.ids);
-        if (set.has(id)) set.delete(id);
-        else set.add(id);
-        if (set.size === 0) {
+        const idSet = new Set(s.selection.ids);
+        if (idSet.has(id)) idSet.delete(id);
+        else idSet.add(id);
+        if (idSet.size === 0) {
           s.selection = { kind: "none" };
         } else {
-          s.selection = { kind: "placement", ids: [...set] };
+          s.selection = { kind: "placement", ids: [...idSet] };
         }
       }),
 
