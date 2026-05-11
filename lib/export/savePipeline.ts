@@ -2,11 +2,16 @@
 import { toast } from "sonner";
 import { useEditorStore } from "../store/editorStore";
 import { useCatalogStore, toEditorProduct } from "../store/catalogStore";
-import { savePlanogram } from "../planograms/actions";
+import { savePlanogram, requestPlanogramPreviewUpload } from "../planograms/actions";
 import { buildExport } from "./buildExport";
 import { captureStagePng } from "./exportImage";
 import { buildPdf } from "./exportPdf";
 import { downloadBlob, downloadDataUrl, nameSlug, tsSlug } from "./downloadFiles";
+
+async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
+  const res = await fetch(dataUrl);
+  return await res.blob();
+}
 
 function getPlanogram() {
   return useEditorStore.getState().planogram;
@@ -37,14 +42,25 @@ export async function saveToCloud(): Promise<{ planogramSlug: string; tenantSlug
     return null;
   }
 
-  // PNG capture is best-effort — if the canvas is empty we still want the
-  // save to succeed and store the data so the user can come back to it.
-  let previewPng: string | undefined;
+  // Capture the PNG and upload it directly to S3 via a presigned PUT.
+  // Both steps are best-effort: a failure here must not block the save,
+  // and the row keeps its previous preview (or none).
+  let previewCode: string | undefined;
   if (state.planogram.shelves.length > 0) {
     try {
-      previewPng = await captureStagePng();
+      const dataUrl = await captureStagePng();
+      const blob = await dataUrlToBlob(dataUrl);
+      const presign = await requestPlanogramPreviewUpload();
+      if (!presign.ok) throw new Error(presign.error);
+      const put = await fetch(presign.uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": "image/png" },
+        body: blob,
+      });
+      if (!put.ok) throw new Error(`S3 PUT failed: ${put.status}`);
+      previewCode = presign.code;
     } catch (err) {
-      console.warn("preview capture failed", err);
+      console.warn("preview capture/upload failed", err);
     }
   }
 
@@ -53,7 +69,7 @@ export async function saveToCloud(): Promise<{ planogramSlug: string; tenantSlug
   fd.set("planogramName", state.planogram.name);
   fd.set("customerName", state.customerName);
   fd.set("planogramData", JSON.stringify(state.planogram));
-  if (previewPng) fd.set("previewPng", previewPng);
+  if (previewCode) fd.set("previewCode", previewCode);
 
   const res = await savePlanogram(fd);
   if (!res.ok) {

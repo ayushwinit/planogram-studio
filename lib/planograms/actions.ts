@@ -6,7 +6,7 @@ import { requireSession, getCurrentTenant } from "@/lib/auth/dal";
 import { listTenantProducts } from "@/lib/catalog/actions";
 import {
   newImageCode,
-  uploadPlanogramPreview,
+  presignedPlanogramPreviewUploadUrl,
   deletePlanogramPreview,
 } from "@/lib/s3";
 import type { Planogram } from "@/lib/types";
@@ -246,16 +246,37 @@ export async function createPlanogram(formData: FormData): Promise<CreatePlanogr
   }
 }
 
+const PreviewCodeSchema = z
+  .string()
+  .trim()
+  .regex(/^[A-Za-z0-9_-]{6,32}$/, { error: "Invalid preview code." });
+
 const SaveSchema = z.object({
   planogramId: z.uuid(),
   planogramName: NameSchema,
   customerName: CustomerSchema,
   planogramData: z.string().min(2),
-  /** data:image/png;base64,... — optional (skipped if capture failed). */
-  previewPng: z.string().optional(),
+  /** S3 object code for the preview PNG the client already uploaded via
+   *  the presigned URL from requestPlanogramPreviewUpload. Omitted when
+   *  the client did not capture a preview. */
+  previewCode: PreviewCodeSchema.optional(),
 });
 
-const PNG_DATA_URL_PREFIX = "data:image/png;base64,";
+/** Issue a presigned PUT URL the client can use to upload a preview PNG
+ *  directly to S3, bypassing the Server Action body size limit. The
+ *  returned code is what the client passes back in savePlanogram. */
+export async function requestPlanogramPreviewUpload(): Promise<
+  { ok: true; code: string; uploadUrl: string } | { ok: false; error: string }
+> {
+  try {
+    await requireSession();
+    const code = newImageCode();
+    const uploadUrl = await presignedPlanogramPreviewUploadUrl(code, "image/png");
+    return { ok: true, code, uploadUrl };
+  } catch (err) {
+    return { ok: false, error: (err as Error).message };
+  }
+}
 
 export async function savePlanogram(formData: FormData): Promise<PlanogramActionResult> {
   const session = await requireSession();
@@ -266,7 +287,7 @@ export async function savePlanogram(formData: FormData): Promise<PlanogramAction
     planogramName: formData.get("planogramName"),
     customerName: formData.get("customerName"),
     planogramData: formData.get("planogramData"),
-    previewPng: formData.get("previewPng") ?? undefined,
+    previewCode: formData.get("previewCode") ?? undefined,
   });
   if (!parsed.success) {
     return { ok: false, error: "Invalid input.", fieldErrors: flattenZod(parsed.error) };
@@ -299,21 +320,13 @@ export async function savePlanogram(formData: FormData): Promise<PlanogramAction
     products,
   });
 
-  // Optional PNG upload — if present, replace the previous one.
+  // Client uploaded a new preview directly to S3 — swap codes and schedule
+  // the old object for cleanup. No new code = keep the existing preview.
   let previewCode: string | null = oldPreviewCode;
   let codeToDelete: string | null = null;
-  if (parsed.data.previewPng?.startsWith(PNG_DATA_URL_PREFIX)) {
-    try {
-      const base64 = parsed.data.previewPng.slice(PNG_DATA_URL_PREFIX.length);
-      const buf = Buffer.from(base64, "base64");
-      const code = newImageCode();
-      await uploadPlanogramPreview(code, buf, "image/png");
-      codeToDelete = oldPreviewCode;
-      previewCode = code;
-    } catch (err) {
-      // Don't fail the whole save just because S3 hiccupped.
-      console.warn("planogram preview upload failed", err);
-    }
+  if (parsed.data.previewCode) {
+    codeToDelete = oldPreviewCode;
+    previewCode = parsed.data.previewCode;
   }
 
   const newSlug = planogramSlug(parsed.data.planogramName);

@@ -137,3 +137,20 @@ export async function presignedPlanogramPreviewUrl(
     { expiresIn: expiresInSec },
   );
 }
+
+export async function presignedPlanogramPreviewUploadUrl(
+  code: string,
+  contentType: string,
+  expiresInSec = 300,
+): Promise<string> {
+  const client = getClient();
+  return await getSignedUrl(
+    client,
+    new PutObjectCommand({
+      Bucket: getBucket(),
+      Key: planogramPreviewKeyFor(code),
+      ContentType: contentType,
+    }),
+    { expiresIn: expiresInSec },
+  );
+}
