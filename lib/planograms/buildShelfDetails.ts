@@ -22,6 +22,7 @@ function projectProduct(t: TenantProduct): Product {
     sku: t.itemCode,
     brand: t.brand,
     category: t.category,
+    uom: t.uom,
     imageUrl: "", // unused by arrangement maths
     widthMm: dims?.widthMm ?? DEFAULT_DIM_MM,
     heightMm: dims?.heightMm ?? DEFAULT_DIM_MM,

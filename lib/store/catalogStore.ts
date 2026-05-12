@@ -25,6 +25,7 @@ export function toEditorProduct(t: TenantProduct): Product {
     sku: t.itemCode,
     brand: t.brand,
     category: t.category,
+    uom: t.uom,
     imageUrl: t.itemImageUrl ? `/api/catalog/image/${t.itemImageUrl}` : PLACEHOLDER_IMAGE,
     widthMm: dims?.widthMm ?? DEFAULT_DIM_MM,
     heightMm: dims?.heightMm ?? DEFAULT_DIM_MM,

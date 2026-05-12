@@ -47,8 +47,19 @@ export function buildPdf(planogram: PlanogramExport, imageDataUrl: string): Blob
   pdf.setFontSize(8);
   pdf.setFont("helvetica", "normal");
 
-  const headers = ["#", "Brand", "Product", "Shelf", "Qty", "Arrangement", "X (mm)", "Y (mm)", "W×H (mm)"];
-  const colX = [margin, margin + 8, margin + 35, margin + 90, margin + 110, margin + 120, margin + 160, margin + 180, margin + 200];
+  const headers = ["#", "Brand", "Product", "UOM", "Shelf", "Qty", "Arrangement", "X (mm)", "Y (mm)", "W×H (mm)"];
+  const colX = [
+    margin,
+    margin + 8,
+    margin + 33,
+    margin + 82,
+    margin + 96,
+    margin + 116,
+    margin + 125,
+    margin + 165,
+    margin + 185,
+    margin + 205,
+  ];
   let y = margin + 12;
   pdf.setFont("helvetica", "bold");
   headers.forEach((h, i) => pdf.text(h, colX[i], y));
@@ -83,13 +94,14 @@ export function buildPdf(planogram: PlanogramExport, imageDataUrl: string): Blob
     }
     pdf.text(String(idx + 1), colX[0], y);
     pdf.text(p.product.brand, colX[1], y);
-    pdf.text(truncate(p.product.name, 28), colX[2], y);
-    pdf.text(truncate(shelfLabel, 13), colX[3], y);
-    pdf.text(String(p.totalUnits), colX[4], y);
-    pdf.text(arrStr, colX[5], y);
-    pdf.text(String(Math.round(p.absoluteXMm)), colX[6], y);
-    pdf.text(String(Math.round(p.absoluteYMm)), colX[7], y);
-    pdf.text(`${Math.round(p.boundingBoxMm.w)}×${Math.round(p.boundingBoxMm.h)}`, colX[8], y);
+    pdf.text(truncate(p.product.name, 24), colX[2], y);
+    pdf.text(truncate(p.product.uom ?? "—", 6), colX[3], y);
+    pdf.text(truncate(shelfLabel, 11), colX[4], y);
+    pdf.text(String(p.totalUnits), colX[5], y);
+    pdf.text(arrStr, colX[6], y);
+    pdf.text(String(Math.round(p.absoluteXMm)), colX[7], y);
+    pdf.text(String(Math.round(p.absoluteYMm)), colX[8], y);
+    pdf.text(`${Math.round(p.boundingBoxMm.w)}×${Math.round(p.boundingBoxMm.h)}`, colX[9], y);
     y += 5;
   });
 

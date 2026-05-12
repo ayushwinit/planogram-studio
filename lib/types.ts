@@ -8,6 +8,7 @@ export interface Product {
   sku: string | null;
   brand: string;
   category: string;
+  uom: string | null;
   imageUrl: string;
   widthMm: number;
   heightMm: number;
