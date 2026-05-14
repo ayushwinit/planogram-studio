@@ -38,7 +38,8 @@ export function CatalogItemDialog({ open, onClose, editing }: Props) {
   const removeProduct = useCatalogStore((s) => s.removeProduct);
 
   const [category, setCategory] = React.useState("");
-  const [brand, setBrand] = React.useState("");
+  const [mainBrand, setMainBrand] = React.useState("");
+  const [subBrand, setSubBrand] = React.useState("");
   const [itemCode, setItemCode] = React.useState("");
   const [barcode, setBarcode] = React.useState("");
   const [itemDescription, setItemDescription] = React.useState("");
@@ -82,7 +83,8 @@ export function CatalogItemDialog({ open, onClose, editing }: Props) {
     setWasOpen(open);
     if (open) {
       setCategory(editing?.category ?? "");
-      setBrand(editing?.brand ?? "");
+      setMainBrand(editing?.mainBrand ?? "");
+      setSubBrand(editing?.subBrand ?? "");
       setItemCode(editing?.itemCode ?? "");
       setBarcode(editing?.barcode ?? "");
       setItemDescription(editing?.itemDescription ?? "");
@@ -118,8 +120,9 @@ export function CatalogItemDialog({ open, onClose, editing }: Props) {
   function validateLocal(): FieldErrors | null {
     const e: FieldErrors = {};
     if (!category.trim()) e.category = "Required";
-    if (!brand.trim()) e.brand = "Required";
+    if (!mainBrand.trim()) e.mainBrand = "Required";
     if (!itemDescription.trim()) e.itemDescription = "Required";
+    if (!uom.trim()) e.uom = "Required";
     const someDimSet = widthCm || heightCm;
     const allDimsSet = widthCm && heightCm;
     if (someDimSet && !allDimsSet) e.dimensions = "Enter both width and height, or leave both blank.";
@@ -152,7 +155,8 @@ export function CatalogItemDialog({ open, onClose, editing }: Props) {
 
     const fd = new FormData();
     fd.set("category", category.trim());
-    fd.set("brand", brand.trim());
+    fd.set("mainBrand", mainBrand.trim());
+    fd.set("subBrand", subBrand.trim());
     fd.set("itemCode", itemCode.trim());
     fd.set("barcode", barcode.trim());
     fd.set("itemDescription", itemDescription.trim());
@@ -212,7 +216,7 @@ export function CatalogItemDialog({ open, onClose, editing }: Props) {
 
         <form onSubmit={onSubmit} className="grid grid-cols-[1fr_180px] gap-5">
           <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-3">
               <FormField label="Category" required error={errors.category}>
                 <Input
                   value={category}
@@ -221,11 +225,18 @@ export function CatalogItemDialog({ open, onClose, editing }: Props) {
                   autoFocus
                 />
               </FormField>
-              <FormField label="Brand" required error={errors.brand}>
+              <FormField label="Main Brand" required error={errors.mainBrand}>
                 <Input
-                  value={brand}
-                  onChange={(e) => setBrand(e.target.value)}
+                  value={mainBrand}
+                  onChange={(e) => setMainBrand(e.target.value)}
                   placeholder="e.g. Coca-Cola"
+                />
+              </FormField>
+              <FormField label="Sub Brand" hint="optional" error={errors.subBrand}>
+                <Input
+                  value={subBrand}
+                  onChange={(e) => setSubBrand(e.target.value)}
+                  placeholder="e.g. Diet Coke"
                 />
               </FormField>
             </div>
@@ -240,7 +251,7 @@ export function CatalogItemDialog({ open, onClose, editing }: Props) {
             </FormField>
 
             <div className="grid grid-cols-3 gap-3">
-              <FormField label="UOM" hint="optional" error={errors.uom}>
+              <FormField label="UOM" required error={errors.uom}>
                 <Input value={uom} onChange={(e) => setUom(e.target.value)} placeholder="e.g. EA" />
               </FormField>
               <FormField label="Item code" hint="optional" error={errors.itemCode}>

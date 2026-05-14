@@ -143,6 +143,11 @@ interface EditorState {
   hoverDropTarget: { shelfId: string; rowId: RowSlot } | null;
 
   hydrate: (input: HydrateInput) => void;
+  /** Replace the current planogram's shelves + placements (and canvas size)
+   *  with those from another planogram. Identity fields (id, name, customer)
+   *  are preserved so the user is still editing the same record. IDs of the
+   *  imported nodes are regenerated to avoid collisions. */
+  importFromPlanogram: (source: Planogram) => void;
   markSaved: (savedAt: string, planogramSlug?: string) => void;
   setCustomerName: (s: string) => void;
 
@@ -266,6 +271,45 @@ export const useEditorStore = create<EditorState>()(
         s.zoom = DEFAULT_ZOOM;
         s.panX = 80;
         s.panY = 80;
+      }),
+
+    importFromPlanogram: (source) =>
+      set((s) => {
+        // Regenerate every shelf / row / placement id so the imported nodes
+        // can't collide with anything that referenced the original IDs (e.g.
+        // if the user imports the same source twice). Placements need their
+        // shelfId/rowId references remapped to the new ids.
+        const shelfIdMap = new Map<string, string>();
+        const rowIdMap = new Map<string, string>();
+
+        const newShelves = source.shelves.map((shelf) => {
+          const newShelfId = nanoid();
+          shelfIdMap.set(shelf.id, newShelfId);
+          const newRows = shelf.rows.map((row) => {
+            const newRowId = nanoid();
+            rowIdMap.set(row.id, newRowId);
+            return { ...row, id: newRowId };
+          });
+          return { ...shelf, id: newShelfId, rows: newRows };
+        });
+
+        const newPlacements = source.placements
+          .map((p) => {
+            const newShelfId = shelfIdMap.get(p.shelfId);
+            if (!newShelfId) return null;
+            // rowId is either a real row id or the literal "top" sentinel.
+            const newRowId = p.rowId === "top" ? "top" : rowIdMap.get(p.rowId);
+            if (!newRowId) return null;
+            return { ...p, instanceId: nanoid(), shelfId: newShelfId, rowId: newRowId };
+          })
+          .filter((p): p is NonNullable<typeof p> => p !== null);
+
+        s.planogram.shelves = newShelves;
+        s.planogram.placements = newPlacements;
+        s.planogram.canvasWidthMm = source.canvasWidthMm;
+        s.planogram.canvasHeightMm = source.canvasHeightMm;
+        s.selection = { kind: "none" };
+        markEdit(s);
       }),
 
     markSaved: (savedAt, planogramSlug) =>

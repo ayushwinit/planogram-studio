@@ -47,18 +47,31 @@ export function buildPdf(planogram: PlanogramExport, imageDataUrl: string): Blob
   pdf.setFontSize(8);
   pdf.setFont("helvetica", "normal");
 
-  const headers = ["#", "Brand", "Product", "UOM", "Shelf", "Qty", "Arrangement", "X (mm)", "Y (mm)", "W×H (mm)"];
+  const headers = [
+    "#",
+    "Main Brand",
+    "Sub Brand",
+    "Product",
+    "UOM",
+    "Shelf",
+    "Qty",
+    "Arrangement",
+    "X (mm)",
+    "Y (mm)",
+    "W×H (mm)",
+  ];
   const colX = [
     margin,
     margin + 8,
     margin + 33,
-    margin + 82,
-    margin + 96,
+    margin + 58,
+    margin + 102,
     margin + 116,
-    margin + 125,
-    margin + 165,
+    margin + 136,
+    margin + 145,
     margin + 185,
     margin + 205,
+    margin + 225,
   ];
   let y = margin + 12;
   pdf.setFont("helvetica", "bold");
@@ -93,15 +106,16 @@ export function buildPdf(planogram: PlanogramExport, imageDataUrl: string): Blob
       shelfLabel = row?.label ?? `Shelf ${(row?.index ?? 0) + 1}`;
     }
     pdf.text(String(idx + 1), colX[0], y);
-    pdf.text(p.product.brand, colX[1], y);
-    pdf.text(truncate(p.product.name, 24), colX[2], y);
-    pdf.text(truncate(p.product.uom ?? "—", 6), colX[3], y);
-    pdf.text(truncate(shelfLabel, 11), colX[4], y);
-    pdf.text(String(p.totalUnits), colX[5], y);
-    pdf.text(arrStr, colX[6], y);
-    pdf.text(String(Math.round(p.absoluteXMm)), colX[7], y);
-    pdf.text(String(Math.round(p.absoluteYMm)), colX[8], y);
-    pdf.text(`${Math.round(p.boundingBoxMm.w)}×${Math.round(p.boundingBoxMm.h)}`, colX[9], y);
+    pdf.text(truncate(p.product.mainBrand ?? "—", 12), colX[1], y);
+    pdf.text(truncate(p.product.subBrand ?? "—", 12), colX[2], y);
+    pdf.text(truncate(p.product.name, 22), colX[3], y);
+    pdf.text(truncate(p.product.uom ?? "—", 6), colX[4], y);
+    pdf.text(truncate(shelfLabel, 11), colX[5], y);
+    pdf.text(String(p.totalUnits), colX[6], y);
+    pdf.text(arrStr, colX[7], y);
+    pdf.text(String(Math.round(p.absoluteXMm)), colX[8], y);
+    pdf.text(String(Math.round(p.absoluteYMm)), colX[9], y);
+    pdf.text(`${Math.round(p.boundingBoxMm.w)}×${Math.round(p.boundingBoxMm.h)}`, colX[10], y);
     y += 5;
   });
 

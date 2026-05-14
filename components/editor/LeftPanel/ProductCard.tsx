@@ -20,7 +20,7 @@ export function ProductCard({ product, onEdit }: Props) {
 
   const imageUrl = product.itemImageUrl ? `/api/catalog/image/${product.itemImageUrl}` : null;
   const dims = product.itemDimensions;
-  const brandColor = brandAccentColor(product.brand);
+  const brandColor = brandAccentColor(product.mainBrand ?? "");
 
   return (
     <Tooltip>
@@ -53,7 +53,7 @@ export function ProductCard({ product, onEdit }: Props) {
               className="inline-block h-1.5 w-1.5 rounded-full shrink-0"
               style={{ backgroundColor: brandColor }}
             />
-            <span className="text-[10px] text-slate-500 truncate">{product.brand}</span>
+            <span className="text-[10px] text-slate-500 truncate">{product.subBrand ?? "—"}</span>
           </div>
           <div className="text-[11px] font-medium text-slate-700 leading-tight line-clamp-2 mt-0.5">
             {product.itemDescription}
@@ -82,7 +82,7 @@ export function ProductCard({ product, onEdit }: Props) {
         <div className="text-xs">
           <div className="font-semibold">{product.itemDescription}</div>
           <div className="opacity-80 mt-0.5">
-            {product.brand} · {product.category}
+            {product.mainBrand ?? "—"} · {product.category}
             {product.uom ? ` · ${product.uom}` : ""}
           </div>
           {dims ? (

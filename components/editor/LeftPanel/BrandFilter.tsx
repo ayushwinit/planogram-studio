@@ -16,7 +16,7 @@ export function BrandFilter() {
     const set = new Set<string>();
     for (const p of products) {
       if (categoryFilter && p.category !== categoryFilter) continue;
-      set.add(p.brand);
+      if (p.mainBrand) set.add(p.mainBrand);
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [products, categoryFilter]);
@@ -36,11 +36,11 @@ export function BrandFilter() {
     <SearchAndSelect
       search={search}
       onSearchChange={setSearch}
-      placeholder="Search brands…"
+      placeholder="Search main brands…"
       value={filter}
       onChange={setFilter}
       options={visible}
-      emptyText={brands.length === 0 ? "No brands yet" : "No matches"}
+      emptyText={brands.length === 0 ? "No main brands yet" : "No matches"}
     />
   );
 }
@@ -53,7 +53,7 @@ BrandFilter.useCount = () => {
     const set = new Set<string>();
     for (const p of products) {
       if (categoryFilter && p.category !== categoryFilter) continue;
-      set.add(p.brand);
+      if (p.mainBrand) set.add(p.mainBrand);
     }
     return set.size;
   }, [products, categoryFilter]);

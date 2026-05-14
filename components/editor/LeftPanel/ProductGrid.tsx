@@ -14,23 +14,26 @@ function useFilteredProducts(): TenantProduct[] {
   const products = useCatalogStore((s) => s.products);
   const categoryFilter = useCatalogStore((s) => s.categoryFilter);
   const brandFilter = useCatalogStore((s) => s.brandFilter);
+  const subBrandFilter = useCatalogStore((s) => s.subBrandFilter);
   const search = useCatalogStore((s) => s.productSearch);
 
   return React.useMemo(() => {
     const q = search.trim().toLowerCase();
     return products.filter((p) => {
       if (categoryFilter && p.category !== categoryFilter) return false;
-      if (brandFilter && p.brand !== brandFilter) return false;
+      if (brandFilter && p.mainBrand !== brandFilter) return false;
+      if (subBrandFilter && p.subBrand !== subBrandFilter) return false;
       if (!q) return true;
       return (
         p.itemDescription.toLowerCase().includes(q) ||
         (p.itemCode?.toLowerCase().includes(q) ?? false) ||
         (p.barcode?.toLowerCase().includes(q) ?? false) ||
-        p.brand.toLowerCase().includes(q) ||
+        (p.mainBrand?.toLowerCase().includes(q) ?? false) ||
+        (p.subBrand?.toLowerCase().includes(q) ?? false) ||
         p.category.toLowerCase().includes(q)
       );
     });
-  }, [products, categoryFilter, brandFilter, search]);
+  }, [products, categoryFilter, brandFilter, subBrandFilter, search]);
 }
 
 export function ProductGrid({ onEdit }: Props) {

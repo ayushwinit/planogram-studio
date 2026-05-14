@@ -10,7 +10,8 @@ type Row = {
   product_id: string;
   tenant_id: string;
   category: string;
-  brand: string;
+  main_brand: string | null;
+  brand: string | null;
   item_code: string | null;
   barcode: string | null;
   item_description: string;
@@ -26,7 +27,8 @@ function rowToProduct(r: Row): TenantProduct {
     productId: r.product_id,
     tenantId: r.tenant_id,
     category: r.category,
-    brand: r.brand,
+    mainBrand: r.main_brand,
+    subBrand: r.brand,
     itemCode: r.item_code,
     barcode: r.barcode,
     itemDescription: r.item_description,
@@ -48,7 +50,13 @@ const DimensionsSchema = z
 
 const BaseFieldsSchema = z.object({
   category: z.string().trim().min(1, { error: "Category is required." }),
-  brand: z.string().trim().min(1, { error: "Brand is required." }),
+  mainBrand: z.string().trim().min(1, { error: "Brand is required." }),
+  subBrand: z
+    .string()
+    .trim()
+    .max(120)
+    .optional()
+    .transform((v) => (v ? v : null)),
   itemCode: z
     .string()
     .trim()
@@ -65,9 +73,8 @@ const BaseFieldsSchema = z.object({
   uom: z
     .string()
     .trim()
-    .max(60)
-    .optional()
-    .transform((v) => (v ? v : null)),
+    .min(1, { error: "UOM is required." })
+    .max(60),
   itemDimensions: DimensionsSchema.nullable().optional(),
 });
 
@@ -112,7 +119,7 @@ async function uploadImageFromForm(file: File): Promise<string> {
 export async function listTenantProducts(): Promise<TenantProduct[]> {
   const session = await requireSession();
   const result = await db.query<Row>(
-    `SELECT product_id, tenant_id, category, brand, item_code, barcode,
+    `SELECT product_id, tenant_id, category, main_brand, brand, item_code, barcode,
             item_description, uom, item_image_url, item_dimensions,
             created_at, updated_at
        FROM tenant_products
@@ -128,7 +135,8 @@ export async function createTenantProduct(formData: FormData): Promise<CatalogAc
 
   const parsed = BaseFieldsSchema.safeParse({
     category: formData.get("category"),
-    brand: formData.get("brand"),
+    mainBrand: formData.get("mainBrand"),
+    subBrand: formData.get("subBrand") ?? undefined,
     itemCode: formData.get("itemCode") ?? undefined,
     barcode: formData.get("barcode") ?? undefined,
     itemDescription: formData.get("itemDescription"),
@@ -154,16 +162,17 @@ export async function createTenantProduct(formData: FormData): Promise<CatalogAc
   try {
     const result = await db.query<Row>(
       `INSERT INTO tenant_products
-         (tenant_id, category, brand, item_code, barcode,
+         (tenant_id, category, main_brand, brand, item_code, barcode,
           item_description, uom, item_image_url, item_dimensions)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
-       RETURNING product_id, tenant_id, category, brand, item_code, barcode,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
+       RETURNING product_id, tenant_id, category, main_brand, brand, item_code, barcode,
                  item_description, uom, item_image_url, item_dimensions,
                  created_at, updated_at`,
       [
         session.tenantId,
         parsed.data.category,
-        parsed.data.brand,
+        parsed.data.mainBrand,
+        parsed.data.subBrand,
         parsed.data.itemCode,
         parsed.data.barcode,
         parsed.data.itemDescription,
@@ -197,7 +206,8 @@ export async function updateTenantProduct(
 
   const parsed = BaseFieldsSchema.safeParse({
     category: formData.get("category"),
-    brand: formData.get("brand"),
+    mainBrand: formData.get("mainBrand"),
+    subBrand: formData.get("subBrand") ?? undefined,
     itemCode: formData.get("itemCode") ?? undefined,
     barcode: formData.get("barcode") ?? undefined,
     itemDescription: formData.get("itemDescription"),
@@ -236,21 +246,23 @@ export async function updateTenantProduct(
     const result = await db.query<Row>(
       `UPDATE tenant_products
           SET category = $1,
-              brand = $2,
-              item_code = $3,
-              barcode = $4,
-              item_description = $5,
-              uom = $6,
-              item_image_url = $7,
-              item_dimensions = $8::jsonb,
+              main_brand = $2,
+              brand = $3,
+              item_code = $4,
+              barcode = $5,
+              item_description = $6,
+              uom = $7,
+              item_image_url = $8,
+              item_dimensions = $9::jsonb,
               updated_at = now()
-        WHERE product_id = $9 AND tenant_id = $10
-        RETURNING product_id, tenant_id, category, brand, item_code, barcode,
+        WHERE product_id = $10 AND tenant_id = $11
+        RETURNING product_id, tenant_id, category, main_brand, brand, item_code, barcode,
                   item_description, uom, item_image_url, item_dimensions,
                   created_at, updated_at`,
       [
         parsed.data.category,
-        parsed.data.brand,
+        parsed.data.mainBrand,
+        parsed.data.subBrand,
         parsed.data.itemCode,
         parsed.data.barcode,
         parsed.data.itemDescription,

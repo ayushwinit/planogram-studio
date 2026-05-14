@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { CatalogItemDialog } from "../catalog/CatalogItemDialog";
 import { CategoryFilter } from "./CategoryFilter";
 import { BrandFilter } from "./BrandFilter";
+import { SubBrandFilter } from "./SubBrandFilter";
 import { ProductGrid } from "./ProductGrid";
 import { CollapsibleSection } from "./CollapsibleSection";
 
@@ -19,6 +20,7 @@ export function LeftPanel() {
   // catalog transitions from loading → empty → populated.
   const categoryCount = CategoryFilter.useCount();
   const brandCount = BrandFilter.useCount();
+  const subBrandCount = SubBrandFilter.useCount();
   const productsCount = ProductGrid.useCount();
 
   const [dialogOpen, setDialogOpen] = React.useState(false);
@@ -71,11 +73,14 @@ export function LeftPanel() {
         </div>
       ) : (
         <>
+          <CollapsibleSection title="Main Brands" count={brandCount} defaultOpen={false}>
+            <BrandFilter />
+          </CollapsibleSection>
+          <CollapsibleSection title="Sub Brands" count={subBrandCount} defaultOpen={false}>
+            <SubBrandFilter />
+          </CollapsibleSection>
           <CollapsibleSection title="Categories" count={categoryCount} defaultOpen={false}>
             <CategoryFilter />
-          </CollapsibleSection>
-          <CollapsibleSection title="Brands" count={brandCount} defaultOpen={false}>
-            <BrandFilter />
           </CollapsibleSection>
           <CollapsibleSection
             title="Products"

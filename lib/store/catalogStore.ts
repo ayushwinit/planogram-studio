@@ -23,7 +23,8 @@ export function toEditorProduct(t: TenantProduct): Product {
     id: t.productId,
     name: t.itemDescription,
     sku: t.itemCode,
-    brand: t.brand,
+    mainBrand: t.mainBrand,
+    subBrand: t.subBrand,
     category: t.category,
     uom: t.uom,
     imageUrl: t.itemImageUrl ? `/api/catalog/image/${t.itemImageUrl}` : PLACEHOLDER_IMAGE,
@@ -48,9 +49,11 @@ interface CatalogState {
 
   categoryFilter: string | null;
   brandFilter: string | null;
+  subBrandFilter: string | null;
   productSearch: string;
   categorySearch: string;
   brandSearch: string;
+  subBrandSearch: string;
 
   setProducts: (p: TenantProduct[]) => void;
   setLoaded: (b: boolean) => void;
@@ -59,9 +62,11 @@ interface CatalogState {
 
   setCategoryFilter: (c: string | null) => void;
   setBrandFilter: (b: string | null) => void;
+  setSubBrandFilter: (b: string | null) => void;
   setProductSearch: (q: string) => void;
   setCategorySearch: (q: string) => void;
   setBrandSearch: (q: string) => void;
+  setSubBrandSearch: (q: string) => void;
 
   /** Return the editor-shape Product for a placement to consume. */
   getProduct: (productId: string) => Product | undefined;
@@ -74,9 +79,11 @@ export const useCatalogStore = create<CatalogState>((set, get) => ({
   loaded: false,
   categoryFilter: null,
   brandFilter: null,
+  subBrandFilter: null,
   productSearch: "",
   categorySearch: "",
   brandSearch: "",
+  subBrandSearch: "",
 
   setProducts: (p) => set({ products: p, loaded: true }),
   setLoaded: (b) => set({ loaded: b }),
@@ -93,9 +100,11 @@ export const useCatalogStore = create<CatalogState>((set, get) => ({
 
   setCategoryFilter: (c) => set({ categoryFilter: c }),
   setBrandFilter: (b) => set({ brandFilter: b }),
+  setSubBrandFilter: (b) => set({ subBrandFilter: b }),
   setProductSearch: (q) => set({ productSearch: q }),
   setCategorySearch: (q) => set({ categorySearch: q }),
   setBrandSearch: (q) => set({ brandSearch: q }),
+  setSubBrandSearch: (q) => set({ subBrandSearch: q }),
 
   getProduct: (productId) => {
     const t = get().products.find((p) => p.productId === productId);

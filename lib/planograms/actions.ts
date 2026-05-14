@@ -397,16 +397,122 @@ export async function savePlanogram(formData: FormData): Promise<PlanogramAction
   }
 }
 
-export async function listPlanograms(): Promise<PlanogramSummary[]> {
+export interface PlanogramListFilters {
+  /** Free-text query, matched against planogram_name OR customer_name (ILIKE). */
+  q?: string;
+  /** Exact-match filter on customer_name (driven by the Customer dropdown,
+   *  which is populated from existing values). */
+  customer?: string;
+  /** Match only planograms containing at least one placement whose product has
+   *  the given main brand (DB column `main_brand`, surfaced as `mainBrand` in
+   *  the shelf_details snapshot — older snapshots used the legacy `brand` key,
+   *  which the filter also covers). */
+  mainBrand?: string;
+  /** Same idea for sub-brand. */
+  subBrand?: string;
+}
+
+function escapeLikeSpecials(s: string): string {
+  return s.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
+export async function listPlanograms(
+  filters: PlanogramListFilters = {},
+): Promise<PlanogramSummary[]> {
   const session = await requireSession();
+
+  const where: string[] = ["tenant_id = $1"];
+  const params: unknown[] = [session.tenantId];
+
+  if (filters.q?.trim()) {
+    const like = `%${escapeLikeSpecials(filters.q.trim())}%`;
+    params.push(like);
+    const idx = params.length;
+    where.push(`(planogram_name ILIKE $${idx} OR customer_name ILIKE $${idx})`);
+  }
+
+  if (filters.customer?.trim()) {
+    params.push(filters.customer.trim());
+    where.push(`customer_name = $${params.length}`);
+  }
+
+  // Brand filters use Postgres' jsonpath EXISTS — `$.**.product` walks every
+  // descendant `product` object in shelf_details (covering rows + topPlacements)
+  // and the predicate matches when the brand field equals the requested value.
+  // The brand value is passed via jsonpath vars to dodge SQL/JSONPath injection.
+  //
+  // The sub-brand predicate also accepts the legacy `.brand` key so snapshots
+  // saved before the brand/sub-brand split (where the only field was `brand`)
+  // surface in the Sub brand filter — that legacy value is treated as
+  // sub-brand data per the user's intent.
+  if (filters.mainBrand?.trim()) {
+    params.push(JSON.stringify({ val: filters.mainBrand.trim() }));
+    where.push(
+      `jsonb_path_exists(shelf_details, '$.**.product ? (@.mainBrand == $val)', $${params.length}::jsonb)`,
+    );
+  }
+  if (filters.subBrand?.trim()) {
+    params.push(JSON.stringify({ val: filters.subBrand.trim() }));
+    where.push(
+      `jsonb_path_exists(shelf_details, '$.**.product ? (@.subBrand == $val || @.brand == $val)', $${params.length}::jsonb)`,
+    );
+  }
+
   const result = await db.query<SummaryRow>(
     `SELECT ${SUMMARY_COLUMNS}
        FROM planograms
-      WHERE tenant_id = $1
+      WHERE ${where.join(" AND ")}
       ORDER BY updated_at DESC`,
-    [session.tenantId],
+    params,
   );
   return result.rows.map(rowToSummary);
+}
+
+export async function listPlanogramCustomers(): Promise<string[]> {
+  const session = await requireSession();
+  const result = await db.query<{ customer_name: string }>(
+    `SELECT DISTINCT customer_name
+       FROM planograms
+      WHERE tenant_id = $1 AND customer_name <> ''
+      ORDER BY customer_name`,
+    [session.tenantId],
+  );
+  return result.rows.map((r) => r.customer_name);
+}
+
+export async function listPlanogramBrands(): Promise<{
+  mainBrands: string[];
+  subBrands: string[];
+}> {
+  const session = await requireSession();
+  // Flatten every product object across every planogram for this tenant via
+  // jsonpath, then aggregate distinct brand / subBrand values. Cheap enough
+  // for the tenant-scoped row count we expect; if it grows, swap for a
+  // denormalised brand-array column maintained on save.
+  const result = await db.query<{ main_brand: string | null; sub_brand: string | null }>(
+    // Legacy snapshots (pre brand/sub-brand split) only have a `brand` key
+    // which holds what is now treated as sub-brand data — so the Sub brand
+    // dropdown falls back to that legacy key, while Main brand looks only at
+    // the explicit `mainBrand` field that newer snapshots carry.
+    `SELECT DISTINCT
+            product->>'mainBrand'                              AS main_brand,
+            COALESCE(product->>'subBrand', product->>'brand') AS sub_brand
+       FROM planograms p,
+            LATERAL jsonb_path_query(p.shelf_details, '$.**.product') AS product
+      WHERE p.tenant_id = $1`,
+    [session.tenantId],
+  );
+
+  const mains = new Set<string>();
+  const subs = new Set<string>();
+  for (const row of result.rows) {
+    if (row.main_brand) mains.add(row.main_brand);
+    if (row.sub_brand) subs.add(row.sub_brand);
+  }
+  return {
+    mainBrands: Array.from(mains).sort((a, b) => a.localeCompare(b)),
+    subBrands: Array.from(subs).sort((a, b) => a.localeCompare(b)),
+  };
 }
 
 export async function getPlanogramBySlug(

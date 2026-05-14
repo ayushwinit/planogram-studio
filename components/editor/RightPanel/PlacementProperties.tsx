@@ -25,7 +25,7 @@ export function PlacementProperties({ placementId }: { placementId: string }) {
   const removePlacement = useEditorStore((s) => s.removePlacement);
 
   if (!placement || !product) return null;
-  const brandColor = brandAccentColor(product.brand);
+  const brandColor = brandAccentColor(product.mainBrand ?? "");
 
   const arr = placement.arrangement;
   const metrics = arrangementMetrics(product, arr);
@@ -64,11 +64,16 @@ export function PlacementProperties({ placementId }: { placementId: string }) {
           </div>
           <div className="min-w-0">
             <div className="text-sm font-semibold text-slate-900 truncate">{product.name}</div>
-            <div className="text-[11px] text-slate-500">
-              <span className="px-1.5 py-0.5 rounded text-white text-[10px] mr-1.5 align-middle" style={{ background: brandColor }}>
-                {product.brand}
+            <div className="text-[11px] text-slate-500 flex items-center gap-1.5 flex-wrap mt-0.5">
+              <span className="px-1.5 py-0.5 rounded text-white text-[10px]" style={{ background: brandColor }}>
+                {product.subBrand ?? "—"}
               </span>
-              {product.sku ?? ""}
+              {product.uom ? (
+                <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px]">
+                  {product.uom}
+                </span>
+              ) : null}
+              {product.sku ? <span className="truncate">{product.sku}</span> : null}
             </div>
           </div>
         </div>

@@ -29,7 +29,8 @@ export interface ShelfDetailPlacement {
     id: string;
     sku: string | null;
     barcode: string | null;
-    brand: string;
+    mainBrand: string | null;
+    subBrand: string | null;
     category: string;
     description: string;
     uom: string | null;

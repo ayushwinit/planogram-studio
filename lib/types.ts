@@ -6,7 +6,8 @@ export interface Product {
   id: string;
   name: string;
   sku: string | null;
-  brand: string;
+  mainBrand: string | null;
+  subBrand: string | null;
   category: string;
   uom: string | null;
   imageUrl: string;

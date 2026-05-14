@@ -44,8 +44,8 @@ export function PlaceProductModal({ pending, onClose, onConfirm }: Props) {
     () => (rawProduct ? toEditorProduct(rawProduct) : undefined),
     [rawProduct],
   );
-  const brandColor = product ? brandAccentColor(product.brand) : "#475569";
-  const brandName = product?.brand ?? "";
+  const brandColor = product ? brandAccentColor(product.mainBrand ?? "") : "#475569";
+  const brandName = product?.mainBrand ?? "";
 
   const [kind, setKind] = React.useState<ArrangementKind>("horizontal");
   const [count, setCount] = React.useState<number>(4);

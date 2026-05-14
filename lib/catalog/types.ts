@@ -6,12 +6,17 @@ export interface ItemDimensions {
   depthMm?: number;
 }
 
-/** Mirror of one row in the `tenant_products` table, camelCased for the client. */
+/** Mirror of one row in the `tenant_products` table, camelCased for the client.
+ *  `mainBrand` mirrors DB column `main_brand` (required) and `subBrand` mirrors
+ *  the repurposed `brand` column (optional). */
 export interface TenantProduct {
   productId: string;
   tenantId: string;
   category: string;
-  brand: string;
+  /** May be null for legacy rows that pre-date the main-brand split; the
+   *  catalog dialog still enforces it on save. */
+  mainBrand: string | null;
+  subBrand: string | null;
   itemCode: string | null;
   barcode: string | null;
   itemDescription: string;

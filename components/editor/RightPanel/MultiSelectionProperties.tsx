@@ -32,7 +32,7 @@ export function MultiSelectionProperties({ ids }: { ids: string[] }) {
   // Count duplicates by product so the list reads naturally for typical
   // shelf compositions (e.g. "Coca-Cola 330ml × 6").
   const byProduct = React.useMemo(() => {
-    const m = new Map<string, { name: string; brand: string; count: number; imageUrl: string }>();
+    const m = new Map<string, { name: string; mainBrand: string | null; count: number; imageUrl: string }>();
     for (const p of placements) {
       const raw = products.find((rp) => rp.productId === p.productId);
       if (!raw) continue;
@@ -41,7 +41,7 @@ export function MultiSelectionProperties({ ids }: { ids: string[] }) {
       if (entry) {
         entry.count += 1;
       } else {
-        m.set(p.productId, { name: ep.name, brand: ep.brand, count: 1, imageUrl: ep.imageUrl });
+        m.set(p.productId, { name: ep.name, mainBrand: ep.mainBrand, count: 1, imageUrl: ep.imageUrl });
       }
     }
     return [...m.values()];
@@ -91,9 +91,9 @@ export function MultiSelectionProperties({ ids }: { ids: string[] }) {
                 <div className="text-[10px] text-slate-500 truncate">
                   <span
                     className="px-1 py-px rounded text-white text-[9px] mr-1 align-middle"
-                    style={{ background: brandAccentColor(entry.brand) }}
+                    style={{ background: brandAccentColor(entry.mainBrand ?? "") }}
                   >
-                    {entry.brand}
+                    {entry.mainBrand ?? "—"}
                   </span>
                 </div>
               </div>

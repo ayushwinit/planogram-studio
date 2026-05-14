@@ -2,9 +2,10 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Building2, FolderOpen, Plus } from "lucide-react";
+import { LayoutDashboard, Building2, FolderOpen, Plus, Download } from "lucide-react";
 import UserMenu from "@/components/auth/UserMenu";
 import { Button } from "@/components/ui/Button";
+import { ImportPlanogramDialog } from "./modals/ImportPlanogramDialog";
 
 export type ToolbarUser = { name: string; email: string };
 export type ToolbarTenant = { name: string; logo: string | null };
@@ -13,6 +14,12 @@ export function Toolbar({ user, tenant }: { user: ToolbarUser; tenant: ToolbarTe
   const pathname = usePathname();
   const onBrowse = pathname === "/editor/browse";
   const onNew = pathname === "/editor/new";
+  // The Import button only makes sense when the user is editing a specific
+  // planogram (it replaces *its* shelves) — i.e. anywhere under /editor/
+  // that isn't the browse page or the new-planogram form.
+  const onEditor = pathname?.startsWith("/editor/") && !onBrowse && !onNew;
+
+  const [importOpen, setImportOpen] = React.useState(false);
 
   return (
     <header className="h-14 shrink-0 flex items-center gap-3 px-4 border-b border-slate-200 bg-white shadow-sm z-10">
@@ -44,9 +51,23 @@ export function Toolbar({ user, tenant }: { user: ToolbarUser; tenant: ToolbarTe
             </Link>
           </Button>
         ) : null}
+        {onEditor ? (
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5"
+            onClick={() => setImportOpen(true)}
+          >
+            <Download className="h-4 w-4" /> Import
+          </Button>
+        ) : null}
         <div className="h-6 w-px bg-slate-200 mx-1" />
         <UserMenu name={user.name} email={user.email} />
       </div>
+
+      {onEditor ? (
+        <ImportPlanogramDialog open={importOpen} onClose={() => setImportOpen(false)} />
+      ) : null}
     </header>
   );
 }
