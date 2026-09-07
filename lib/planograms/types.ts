@@ -119,6 +119,8 @@ export interface PlanogramSummary {
   planogramName: string;
   planogramSlug: string;
   customerName: string;
+  /** Folder this planogram lives in; null = root. */
+  folderId: string | null;
   shelvesCount: number;
   productsCount: number;
   unitsCount: number;
@@ -131,6 +133,26 @@ export type PlanogramActionResult =
   | { ok: true; planogram: PlanogramRecord }
   | { ok: false; error: string; fieldErrors?: Record<string, string> };
 
+/** A planogram with the requested name already exists somewhere in the tenant.
+ *  The client uses this to offer "move it here" vs "replace it". */
+export interface PlanogramNameConflict {
+  planogramId: string;
+  planogramName: string;
+  planogramSlug: string;
+  tenantSlug: string;
+  folderId: string | null;
+  /** Human-readable location, e.g. "Choithrams / RAINBOW" or "All planograms". */
+  folderPath: string;
+  /** True when the existing planogram already sits in the target folder — the
+   *  only case where neither move nor replace makes sense as a silent fix. */
+  sameFolder: boolean;
+}
+
 export type CreatePlanogramResult =
   | { ok: true; tenantSlug: string; planogramSlug: string; planogramId: string }
-  | { ok: false; error: string; fieldErrors?: Record<string, string> };
+  | {
+      ok: false;
+      error: string;
+      fieldErrors?: Record<string, string>;
+      conflict?: PlanogramNameConflict;
+    };

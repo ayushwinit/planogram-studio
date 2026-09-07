@@ -1,11 +1,21 @@
 import { requireSession, getCurrentTenant } from "@/lib/auth/dal";
 import { Toolbar } from "@/components/editor/Toolbar";
 import { NewPlanogramForm } from "@/components/editor/NewPlanogramForm";
+import { parseFolderId, getFolderBreadcrumb } from "@/lib/folders/actions";
 
-export default async function NewPlanogramPage() {
-  const [session, tenant] = await Promise.all([
+export default async function NewPlanogramPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const sp = await searchParams;
+  const raw = Array.isArray(sp.folder) ? sp.folder[0] : sp.folder;
+
+  const [session, tenant, folderId, breadcrumb] = await Promise.all([
     requireSession(),
     getCurrentTenant(),
+    parseFolderId(raw),
+    parseFolderId(raw).then(getFolderBreadcrumb),
   ]);
 
   return (
@@ -21,11 +31,14 @@ export default async function NewPlanogramPage() {
               Create a new planogram
             </h1>
             <p className="text-sm text-slate-500 mt-1">
+              {breadcrumb.length > 0
+                ? `Saving into ${breadcrumb.map((c) => c.folderName).join(" / ")}. `
+                : null}
               You&apos;ll choose shelves and place products on the next screen.
             </p>
           </header>
           <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-            <NewPlanogramForm />
+            <NewPlanogramForm folderId={folderId} />
           </div>
         </div>
       </main>

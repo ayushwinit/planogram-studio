@@ -1,0 +1,21 @@
+cd..
+venv\scripts\activate
+cd planogram_studios
+
+
+# Fill in your PostgreSQL connection. Use either DATABASE_URL or the PG* vars.
+DATABASE_URL=postgresql://postgres:jOSjqoLFmOdLdgwlzSNqqBlPUuXLmOWF@trolley.proxy.rlwy.net:20782/railway
+PGHOST=postgres.railway.internal
+PGPORT=5432
+PGUSER=postgres
+PGPASSWORD=jOSjqoLFmOdLdgwlzSNqqBlPUuXLmOWF
+PGDATABASE=railway
+
+# Session signing secret (already generated for you — keep it private)
+SESSION_SECRET=5bd1RHCY11S7UJqIJfBftDZAYSmrw/qxWR6A8R+xX4Fx42jzvjv+jzcPvshzqTcZ
+
+# How long a login session stays valid (seconds). Default: 7 days
+SESSION_TTL_SECONDS=604800
+
+
+

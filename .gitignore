@@ -39,3 +39,17 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# client planogram source documents — reference material, never commit
+*.pdf
+
+# scratch credential notes — never commit
+bucket.txt
+
+# client product photos + generated cutouts — reference material, never commit
+/rainbow_classes
+/rainbow_cutouts
+/rainbow_images
+
+# generated product import data — client material
+/rainbow_products.json

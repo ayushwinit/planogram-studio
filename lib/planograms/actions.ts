@@ -15,6 +15,7 @@ import { buildShelfDetailsAndStats } from "./buildShelfDetails";
 import type {
   CreatePlanogramResult,
   PlanogramActionResult,
+  PlanogramNameConflict,
   PlanogramRecord,
   PlanogramSummary,
   ShelfDetails,
@@ -28,6 +29,7 @@ type Row = {
   planogram_name: string;
   planogram_slug: string;
   customer_name: string;
+  folder_id: string | null;
   shelves_count: number;
   rows_count: number;
   products_count: number;
@@ -50,6 +52,7 @@ type SummaryRow = Pick<
   | "planogram_name"
   | "planogram_slug"
   | "customer_name"
+  | "folder_id"
   | "shelves_count"
   | "products_count"
   | "units_count"
@@ -98,6 +101,7 @@ function rowToSummary(r: SummaryRow): PlanogramSummary {
     planogramName: r.planogram_name,
     planogramSlug: r.planogram_slug,
     customerName: r.customer_name,
+    folderId: r.folder_id,
     shelvesCount: r.shelves_count,
     productsCount: r.products_count,
     unitsCount: r.units_count,
@@ -108,14 +112,14 @@ function rowToSummary(r: SummaryRow): PlanogramSummary {
 }
 
 const FULL_COLUMNS = `planogram_id, tenant_id, tenant_name, tenant_slug,
-  planogram_name, planogram_slug, customer_name,
+  planogram_name, planogram_slug, customer_name, folder_id,
   shelves_count, rows_count, products_count, placements_count, units_count,
   canvas_width_mm, canvas_height_mm,
   planogram_data, shelf_details, preview_image_url,
   created_by, created_at, updated_at`;
 
 const SUMMARY_COLUMNS = `planogram_id, tenant_slug, planogram_name, planogram_slug,
-  customer_name, shelves_count, products_count, units_count,
+  customer_name, folder_id, shelves_count, products_count, units_count,
   preview_image_url, created_at, updated_at`;
 
 const NameSchema = z
@@ -133,6 +137,8 @@ const CustomerSchema = z
 const CreateInputSchema = z.object({
   planogramName: NameSchema,
   customerName: CustomerSchema,
+  /** Folder the new planogram should land in; null = root. */
+  folderId: z.uuid().nullable(),
 });
 
 function isUniqueViolation(err: unknown, indexName: string): boolean {
@@ -179,9 +185,19 @@ export async function createPlanogram(formData: FormData): Promise<CreatePlanogr
   const parsed = CreateInputSchema.safeParse({
     planogramName: formData.get("planogramName"),
     customerName: formData.get("customerName"),
+    folderId: (formData.get("folderId") as string) || null,
   });
   if (!parsed.success) {
     return { ok: false, error: "Invalid input.", fieldErrors: flattenZod(parsed.error) };
+  }
+
+  // A target folder must belong to the caller's tenant.
+  if (parsed.data.folderId) {
+    const owned = await db.query(
+      `SELECT 1 FROM planogram_folders WHERE folder_id = $1 AND tenant_id = $2 LIMIT 1`,
+      [parsed.data.folderId, tenant.tenantId],
+    );
+    if (owned.rows.length === 0) return { ok: false, error: "Folder not found." };
   }
 
   const tSlug = makeTenantSlug(tenant.tenantName);
@@ -205,8 +221,8 @@ export async function createPlanogram(formData: FormData): Promise<CreatePlanogr
     const result = await db.query<{ planogram_id: string; planogram_slug: string }>(
       `INSERT INTO planograms
          (tenant_id, tenant_name, tenant_slug, planogram_name, planogram_slug,
-          customer_name, planogram_data, shelf_details, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9)
+          customer_name, folder_id, planogram_data, shelf_details, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10)
        RETURNING planogram_id, planogram_slug`,
       [
         tenant.tenantId,
@@ -215,6 +231,7 @@ export async function createPlanogram(formData: FormData): Promise<CreatePlanogr
         parsed.data.planogramName,
         pSlug,
         parsed.data.customerName,
+        parsed.data.folderId,
         JSON.stringify(stub),
         JSON.stringify(empty),
         session.userId,
@@ -228,22 +245,130 @@ export async function createPlanogram(formData: FormData): Promise<CreatePlanogr
       planogramId: row.planogram_id,
     };
   } catch (err) {
-    if (isUniqueViolation(err, "planograms_tenant_name_key")) {
+    if (
+      isUniqueViolation(err, "planograms_tenant_name_key") ||
+      isUniqueViolation(err, "planograms_tenant_slug_key")
+    ) {
+      // Hand the caller the existing planogram so it can offer "move it here"
+      // or "replace it" instead of a dead-end error.
+      const conflict = await findNameConflict(
+        parsed.data.planogramName,
+        pSlug,
+        parsed.data.folderId,
+      );
       return {
         ok: false,
         error: "A planogram with this name already exists for your account.",
         fieldErrors: { planogramName: "Name already in use." },
-      };
-    }
-    if (isUniqueViolation(err, "planograms_tenant_slug_key")) {
-      return {
-        ok: false,
-        error: "A planogram with a similar name already exists. Try a more distinctive name.",
-        fieldErrors: { planogramName: "Slug collides with an existing planogram." },
+        ...(conflict ? { conflict } : {}),
       };
     }
     return { ok: false, error: (err as Error).message };
   }
+}
+
+/** Root → folder label for the conflict dialog, e.g. "Choithrams / RAINBOW". */
+async function folderPathLabel(folderId: string | null, tenantId: string): Promise<string> {
+  if (!folderId) return "All planograms";
+  const result = await db.query<{ folder_name: string; depth: number }>(
+    `WITH RECURSIVE trail AS (
+       SELECT folder_id, parent_folder_id, folder_name, 0 AS depth
+         FROM planogram_folders
+        WHERE folder_id = $1 AND tenant_id = $2
+       UNION ALL
+       SELECT f.folder_id, f.parent_folder_id, f.folder_name, t.depth + 1
+         FROM planogram_folders f
+         JOIN trail t ON f.folder_id = t.parent_folder_id
+        WHERE f.tenant_id = $2
+     )
+     SELECT folder_name, depth FROM trail ORDER BY depth DESC`,
+    [folderId, tenantId],
+  );
+  if (result.rows.length === 0) return "All planograms";
+  return result.rows.map((r) => r.folder_name).join(" / ");
+}
+
+/** Locate the planogram blocking `name`/`slug`, if any. */
+async function findNameConflict(
+  name: string,
+  slug: string,
+  targetFolderId: string | null,
+): Promise<PlanogramNameConflict | null> {
+  const tenant = await getCurrentTenant();
+  const result = await db.query<{
+    planogram_id: string;
+    planogram_name: string;
+    planogram_slug: string;
+    tenant_slug: string;
+    folder_id: string | null;
+  }>(
+    `SELECT planogram_id, planogram_name, planogram_slug, tenant_slug, folder_id
+       FROM planograms
+      WHERE tenant_id = $1 AND (lower(planogram_name) = lower($2) OR planogram_slug = $3)
+      LIMIT 1`,
+    [tenant.tenantId, name, slug],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    planogramId: row.planogram_id,
+    planogramName: row.planogram_name,
+    planogramSlug: row.planogram_slug,
+    tenantSlug: row.tenant_slug,
+    folderId: row.folder_id,
+    folderPath: await folderPathLabel(row.folder_id, tenant.tenantId),
+    sameFolder: row.folder_id === targetFolderId,
+  };
+}
+
+/** "Move it here" — relocate an existing planogram into `folderId` (null = root),
+ *  keeping all of its shelves, placements and preview intact. */
+export async function movePlanogramToFolder(
+  planogramId: string,
+  folderId: string | null,
+): Promise<CreatePlanogramResult> {
+  const tenant = await getCurrentTenant();
+
+  if (!z.uuid().safeParse(planogramId).success) {
+    return { ok: false, error: "Invalid planogram id." };
+  }
+  if (folderId) {
+    if (!z.uuid().safeParse(folderId).success) {
+      return { ok: false, error: "Invalid folder id." };
+    }
+    const owned = await db.query(
+      `SELECT 1 FROM planogram_folders WHERE folder_id = $1 AND tenant_id = $2 LIMIT 1`,
+      [folderId, tenant.tenantId],
+    );
+    if (owned.rows.length === 0) return { ok: false, error: "Folder not found." };
+  }
+
+  const result = await db.query<{ planogram_slug: string; tenant_slug: string }>(
+    `UPDATE planograms
+        SET folder_id = $1, updated_at = now()
+      WHERE planogram_id = $2 AND tenant_id = $3
+      RETURNING planogram_slug, tenant_slug`,
+    [folderId, planogramId, tenant.tenantId],
+  );
+  if (result.rows.length === 0) return { ok: false, error: "Planogram not found." };
+
+  return {
+    ok: true,
+    tenantSlug: result.rows[0].tenant_slug,
+    planogramSlug: result.rows[0].planogram_slug,
+    planogramId,
+  };
+}
+
+/** "Create fresh here + delete the old one" — drops the conflicting planogram
+ *  (and its S3 preview) first, then runs the normal create. */
+export async function replacePlanogram(
+  oldPlanogramId: string,
+  formData: FormData,
+): Promise<CreatePlanogramResult> {
+  const deleted = await deletePlanogram(oldPlanogramId);
+  if (!deleted.ok) return { ok: false, error: deleted.error };
+  return await createPlanogram(formData);
 }
 
 const PreviewCodeSchema = z
@@ -410,6 +535,11 @@ export interface PlanogramListFilters {
   mainBrand?: string;
   /** Same idea for sub-brand. */
   subBrand?: string;
+  /** Folder scope: a uuid restricts to that folder, `null` means root-level
+   *  planograms only, and `undefined` searches across every folder. The browse
+   *  page uses `undefined` at the root while a filter is active, so search
+   *  reaches into subfolders, and `null` otherwise so the root stays tidy. */
+  folderId?: string | null;
 }
 
 function escapeLikeSpecials(s: string): string {
@@ -423,6 +553,13 @@ export async function listPlanograms(
 
   const where: string[] = ["tenant_id = $1"];
   const params: unknown[] = [session.tenantId];
+
+  if (filters.folderId === null) {
+    where.push(`folder_id IS NULL`);
+  } else if (typeof filters.folderId === "string") {
+    params.push(filters.folderId);
+    where.push(`folder_id = $${params.length}`);
+  }
 
   if (filters.q?.trim()) {
     const like = `%${escapeLikeSpecials(filters.q.trim())}%`;

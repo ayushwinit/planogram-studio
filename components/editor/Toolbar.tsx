@@ -1,17 +1,36 @@
 "use client";
 import * as React from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { LayoutDashboard, Building2, FolderOpen, Plus, Download } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { toast } from "sonner";
+import {
+  LayoutDashboard,
+  Building2,
+  FolderOpen,
+  FolderPlus,
+  Plus,
+  Download,
+} from "lucide-react";
 import UserMenu from "@/components/auth/UserMenu";
 import { Button } from "@/components/ui/Button";
+import { createFolder } from "@/lib/folders/actions";
 import { ImportPlanogramDialog } from "./modals/ImportPlanogramDialog";
 
 export type ToolbarUser = { name: string; email: string };
 export type ToolbarTenant = { name: string; logo: string | null };
 
-export function Toolbar({ user, tenant }: { user: ToolbarUser; tenant: ToolbarTenant }) {
+export function Toolbar({
+  user,
+  tenant,
+  folderId = null,
+}: {
+  user: ToolbarUser;
+  tenant: ToolbarTenant;
+  /** Folder the user is currently browsing — new items land here. Null = root. */
+  folderId?: string | null;
+}) {
   const pathname = usePathname();
+  const router = useRouter();
   const onBrowse = pathname === "/editor/browse";
   const onNew = pathname === "/editor/new";
   // The Import button only makes sense when the user is editing a specific
@@ -20,6 +39,27 @@ export function Toolbar({ user, tenant }: { user: ToolbarUser; tenant: ToolbarTe
   const onEditor = pathname?.startsWith("/editor/") && !onBrowse && !onNew;
 
   const [importOpen, setImportOpen] = React.useState(false);
+  const [creatingFolder, setCreatingFolder] = React.useState(false);
+
+  async function handleCreateFolder() {
+    const name = prompt("New folder name");
+    if (!name?.trim()) return;
+    setCreatingFolder(true);
+    const fd = new FormData();
+    fd.set("folderName", name.trim());
+    if (folderId) fd.set("parentFolderId", folderId);
+    const res = await createFolder(fd);
+    setCreatingFolder(false);
+    if (!res.ok) {
+      toast.error(res.error);
+      return;
+    }
+    toast.success("Folder created");
+    // On browse this just refreshes the list; elsewhere it takes the user to
+    // the folder they were browsing so the new folder is actually visible.
+    if (onBrowse) router.refresh();
+    else router.push(folderId ? `/editor/browse?folder=${folderId}` : "/editor/browse");
+  }
 
   return (
     <header className="h-14 shrink-0 flex items-center gap-3 px-4 border-b border-slate-200 bg-white shadow-sm z-10">
@@ -45,11 +85,22 @@ export function Toolbar({ user, tenant }: { user: ToolbarUser; tenant: ToolbarTe
           </Button>
         ) : null}
         {!onNew ? (
-          <Button asChild size="sm" variant="primary" className="gap-1.5">
-            <Link href="/editor/new">
-              <Plus className="h-4 w-4" /> New Planogram
-            </Link>
-          </Button>
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5"
+              onClick={handleCreateFolder}
+              disabled={creatingFolder}
+            >
+              <FolderPlus className="h-4 w-4" /> New Folder
+            </Button>
+            <Button asChild size="sm" variant="primary" className="gap-1.5">
+              <Link href={folderId ? `/editor/new?folder=${folderId}` : "/editor/new"}>
+                <Plus className="h-4 w-4" /> New Planogram
+              </Link>
+            </Button>
+          </>
         ) : null}
         {onEditor ? (
           <Button

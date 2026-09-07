@@ -15,11 +15,23 @@ import {
   X,
   SlidersHorizontal,
   Loader2,
+  Folder,
+  FolderPlus,
+  Home,
+  ChevronRight,
+  Pencil,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
 import { deletePlanogram } from "@/lib/planograms/actions";
 import type { PlanogramSummary } from "@/lib/planograms/types";
+import {
+  createFolder,
+  deleteFolder,
+  renameFolder,
+  countFolderContents,
+} from "@/lib/folders/actions";
+import type { FolderCrumb, FolderSummary } from "@/lib/folders/types";
 import { cn } from "@/lib/cn";
 
 interface FilterValues {
@@ -49,14 +61,20 @@ function formatRelative(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
-function buildQueryString(values: FilterValues): string {
+function buildQueryString(values: FilterValues, folderId: string | null): string {
   const params = new URLSearchParams();
+  if (folderId) params.set("folder", folderId);
   if (values.q.trim()) params.set("q", values.q.trim());
   if (values.customer) params.set("customer", values.customer);
   if (values.mainBrand) params.set("mainBrand", values.mainBrand);
   if (values.subBrand) params.set("subBrand", values.subBrand);
   const s = params.toString();
   return s ? `?${s}` : "";
+}
+
+/** Link to a folder view, dropping any active filters so the folder opens clean. */
+function folderHref(folderId: string | null): string {
+  return folderId ? `/editor/browse?folder=${folderId}` : "/editor/browse";
 }
 
 function activeFilterCount(values: FilterValues): number {
@@ -70,12 +88,20 @@ function activeFilterCount(values: FilterValues): number {
 
 export function BrowsePlanograms({
   planograms,
+  folders,
+  breadcrumb,
+  currentFolderId,
+  searchingAllFolders,
   availableMainBrands,
   availableSubBrands,
   availableCustomers,
   initialFilters,
 }: {
   planograms: PlanogramSummary[];
+  folders: FolderSummary[];
+  breadcrumb: FolderCrumb[];
+  currentFolderId: string | null;
+  searchingAllFolders: boolean;
   availableMainBrands: string[];
   availableSubBrands: string[];
   availableCustomers: string[];
@@ -85,6 +111,8 @@ export function BrowsePlanograms({
   const pathname = usePathname();
   const [isPending, startTransition] = React.useTransition();
   const [pendingDelete, setPendingDelete] = React.useState<string | null>(null);
+  const [pendingFolder, setPendingFolder] = React.useState<string | null>(null);
+  const [creatingFolder, setCreatingFolder] = React.useState(false);
 
   // Local mirror of the URL state so the inputs can be controlled. We keep
   // this in sync with `initialFilters` (driven by the URL) so back/forward
@@ -101,12 +129,12 @@ export function BrowsePlanograms({
 
   const pushFilters = React.useCallback(
     (next: FilterValues) => {
-      const qs = buildQueryString(next);
+      const qs = buildQueryString(next, currentFolderId);
       startTransition(() => {
         router.replace(`${pathname}${qs}`, { scroll: false });
       });
     },
-    [pathname, router],
+    [pathname, router, currentFolderId],
   );
 
   // The text search is debounced so we don't refetch on every keystroke.
@@ -153,22 +181,96 @@ export function BrowsePlanograms({
     router.refresh();
   }
 
+  async function handleCreateFolder() {
+    const name = prompt("New folder name");
+    if (!name?.trim()) return;
+    setCreatingFolder(true);
+    const fd = new FormData();
+    fd.set("folderName", name.trim());
+    if (currentFolderId) fd.set("parentFolderId", currentFolderId);
+    const res = await createFolder(fd);
+    setCreatingFolder(false);
+    if (!res.ok) {
+      toast.error(res.error);
+      return;
+    }
+    toast.success("Folder created");
+    router.refresh();
+  }
+
+  async function handleRenameFolder(f: FolderSummary) {
+    const name = prompt("Rename folder", f.folderName);
+    if (!name?.trim() || name.trim() === f.folderName) return;
+    setPendingFolder(f.folderId);
+    const res = await renameFolder(f.folderId, name.trim());
+    setPendingFolder(null);
+    if (!res.ok) {
+      toast.error(res.error);
+      return;
+    }
+    toast.success("Folder renamed");
+    router.refresh();
+  }
+
+  async function handleDeleteFolder(f: FolderSummary) {
+    setPendingFolder(f.folderId);
+    // Count the whole subtree, not just direct children, so the warning is honest.
+    const { folders: subFolders, planograms: subPlanograms } = await countFolderContents(
+      f.folderId,
+    );
+    const parts: string[] = [];
+    if (subFolders > 0) parts.push(`${subFolders} subfolder${subFolders === 1 ? "" : "s"}`);
+    if (subPlanograms > 0)
+      parts.push(`${subPlanograms} planogram${subPlanograms === 1 ? "" : "s"}`);
+    const detail = parts.length ? `\n\nThis also deletes ${parts.join(" and ")}.` : "";
+    if (!confirm(`Delete folder "${f.folderName}"?${detail}\n\nThis cannot be undone.`)) {
+      setPendingFolder(null);
+      return;
+    }
+    const res = await deleteFolder(f.folderId);
+    setPendingFolder(null);
+    if (!res.ok) {
+      toast.error(res.error);
+      return;
+    }
+    toast.success("Folder deleted");
+    router.refresh();
+  }
+
   return (
     <div className="max-w-6xl mx-auto px-6 py-8">
+      <Breadcrumb trail={breadcrumb} />
+
       <header className="flex items-center gap-3 mb-6">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Planograms</h1>
+          <h1 className="text-2xl font-semibold text-slate-900">
+            {breadcrumb.length > 0
+              ? breadcrumb[breadcrumb.length - 1].folderName
+              : "Planograms"}
+          </h1>
           <p className="text-sm text-slate-500 mt-0.5">
             {activeCount > 0
-              ? `${planograms.length} match${planograms.length === 1 ? "" : "es"} · ${activeCount} filter${activeCount === 1 ? "" : "s"} active`
-              : planograms.length === 0
-              ? "No planograms yet — create your first one."
-              : `${planograms.length} saved planogram${planograms.length === 1 ? "" : "s"}.`}
+              ? `${planograms.length} match${planograms.length === 1 ? "" : "es"} · ${activeCount} filter${activeCount === 1 ? "" : "s"} active${searchingAllFolders ? " · searching all folders" : ""}`
+              : planograms.length === 0 && folders.length === 0
+              ? "Nothing here yet — create a folder or a planogram."
+              : `${folders.length} folder${folders.length === 1 ? "" : "s"} · ${planograms.length} planogram${planograms.length === 1 ? "" : "s"}.`}
           </p>
         </div>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          <Button
+            variant="outline"
+            className="gap-1.5"
+            onClick={handleCreateFolder}
+            disabled={creatingFolder}
+          >
+            <FolderPlus className="h-4 w-4" /> New Folder
+          </Button>
           <Button asChild variant="primary" className="gap-1.5">
-            <Link href="/editor/new">
+            <Link
+              href={
+                currentFolderId ? `/editor/new?folder=${currentFolderId}` : "/editor/new"
+              }
+            >
               <Plus className="h-4 w-4" /> New Planogram
             </Link>
           </Button>
@@ -195,31 +297,124 @@ export function BrowsePlanograms({
           isPending && "opacity-60 pointer-events-none",
         )}
       >
-        {planograms.length === 0 ? (
-          <div className="rounded-xl border-2 border-dashed border-slate-200 bg-white py-16 text-center">
-            <div className="text-sm text-slate-500">
-              {activeCount > 0
-                ? "No planograms match the current filters."
-                : "Nothing here yet."}
+        {folders.length > 0 ? (
+          <div className="mb-6">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">
+              Folders
+            </h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {folders.map((f) => (
+                <FolderCard
+                  key={f.folderId}
+                  folder={f}
+                  busy={pendingFolder === f.folderId}
+                  onRename={() => handleRenameFolder(f)}
+                  onDelete={() => handleDeleteFolder(f)}
+                />
+              ))}
             </div>
-            {activeCount > 0 ? (
-              <Button variant="ghost" size="sm" className="mt-3" onClick={resetAll}>
-                Clear filters
-              </Button>
-            ) : null}
           </div>
+        ) : null}
+
+        {planograms.length === 0 ? (
+          folders.length === 0 || activeCount > 0 ? (
+            <div className="rounded-xl border-2 border-dashed border-slate-200 bg-white py-16 text-center">
+              <div className="text-sm text-slate-500">
+                {activeCount > 0
+                  ? "No planograms match the current filters."
+                  : "Nothing here yet."}
+              </div>
+              {activeCount > 0 ? (
+                <Button variant="ghost" size="sm" className="mt-3" onClick={resetAll}>
+                  Clear filters
+                </Button>
+              ) : null}
+            </div>
+          ) : null
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {planograms.map((p) => (
-              <PlanogramCard
-                key={p.planogramId}
-                summary={p}
-                onDelete={() => handleDelete(p)}
-                deleting={pendingDelete === p.planogramId}
-              />
-            ))}
+          <div>
+            {folders.length > 0 ? (
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">
+                Planograms
+              </h2>
+            ) : null}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {planograms.map((p) => (
+                <PlanogramCard
+                  key={p.planogramId}
+                  summary={p}
+                  onDelete={() => handleDelete(p)}
+                  deleting={pendingDelete === p.planogramId}
+                />
+              ))}
+            </div>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function Breadcrumb({ trail }: { trail: FolderCrumb[] }) {
+  return (
+    <nav className="flex items-center gap-1 text-sm text-slate-500 mb-3 flex-wrap">
+      <Link
+        href={folderHref(null)}
+        className="inline-flex items-center gap-1 hover:text-indigo-600 transition"
+      >
+        <Home className="h-3.5 w-3.5" /> All planograms
+      </Link>
+      {trail.map((c, i) => (
+        <React.Fragment key={c.folderId}>
+          <ChevronRight className="h-3.5 w-3.5 text-slate-300" />
+          {i === trail.length - 1 ? (
+            <span className="text-slate-900 font-medium">{c.folderName}</span>
+          ) : (
+            <Link href={folderHref(c.folderId)} className="hover:text-indigo-600 transition">
+              {c.folderName}
+            </Link>
+          )}
+        </React.Fragment>
+      ))}
+    </nav>
+  );
+}
+
+function FolderCard({
+  folder: f,
+  busy,
+  onRename,
+  onDelete,
+}: {
+  folder: FolderSummary;
+  busy: boolean;
+  onRename: () => void;
+  onDelete: () => void;
+}) {
+  const bits: string[] = [];
+  if (f.subfolderCount > 0)
+    bits.push(`${f.subfolderCount} folder${f.subfolderCount === 1 ? "" : "s"}`);
+  bits.push(`${f.planogramCount} planogram${f.planogramCount === 1 ? "" : "s"}`);
+
+  return (
+    <div className="group flex items-center gap-3 rounded-xl border border-slate-200 bg-white shadow-sm px-3 py-3 hover:shadow-md hover:border-indigo-200 transition">
+      <Link href={folderHref(f.folderId)} className="flex items-center gap-3 min-w-0 flex-1">
+        <span className="grid place-items-center h-9 w-9 rounded-lg bg-indigo-50 text-indigo-600 shrink-0">
+          <Folder className="h-4.5 w-4.5" />
+        </span>
+        <span className="min-w-0">
+          <span className="block font-medium text-slate-900 truncate">{f.folderName}</span>
+          <span className="block text-xs text-slate-500 truncate">{bits.join(" · ")}</span>
+        </span>
+      </Link>
+      <div className="flex items-center gap-0.5 shrink-0">
+        {busy ? <Loader2 className="h-4 w-4 animate-spin text-slate-400" /> : null}
+        <Button size="sm" variant="ghost" onClick={onRename} disabled={busy} aria-label="Rename folder">
+          <Pencil className="h-4 w-4 text-slate-500" />
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onDelete} disabled={busy} aria-label="Delete folder">
+          <Trash2 className="h-4 w-4 text-rose-600" />
+        </Button>
       </div>
     </div>
   );
