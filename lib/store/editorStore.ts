@@ -733,10 +733,21 @@ export const useEditorStore = create<EditorState>()(
             .sort((a, b) => a.p.xMm - b.p.xMm);
           const stacks: Stack[] = bases.map((b) => ({ members: [b], xMm: b.p.xMm }));
           for (const it of sized.filter((x) => x.p.yMm >= 1).sort((a, b) => a.p.yMm - b.p.yMm)) {
-            const host = stacks.find((st) => {
-              const base = st.members[0];
-              return it.p.xMm >= base.p.xMm - 1 && it.p.xMm <= base.p.xMm + base.currentWidthMm + 1;
-            });
+            // Pick the stack this one physically sits over — the widest overlap
+            // wins. Testing the left edge alone missed a wide product centred on
+            // a narrow one, whose left edge falls outside the base entirely.
+            let host: Stack | undefined;
+            let bestOverlap = 0;
+            for (const st of stacks) {
+              const left = Math.min(...st.members.map((m) => m.p.xMm));
+              const right = Math.max(...st.members.map((m) => m.p.xMm + m.currentWidthMm));
+              const overlap =
+                Math.min(right, it.p.xMm + it.currentWidthMm) - Math.max(left, it.p.xMm);
+              if (overlap > bestOverlap) {
+                bestOverlap = overlap;
+                host = st;
+              }
+            }
             // An orphan (nothing underneath it) becomes a stack of its own and
             // is dropped back to the floor.
             if (host) host.members.push(it);
