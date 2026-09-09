@@ -16,6 +16,3 @@ SESSION_SECRET=5bd1RHCY11S7UJqIJfBftDZAYSmrw/qxWR6A8R+xX4Fx42jzvjv+jzcPvshzqTcZ
 
 # How long a login session stays valid (seconds). Default: 7 days
 SESSION_TTL_SECONDS=604800
-
-
-
