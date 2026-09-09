@@ -266,10 +266,9 @@ interface EditorState {
     replaceExisting: boolean;
   }) => number;
 
-  /** Exchange two inner shelves: their products AND their identity (label,
-   *  height, colours). The list positions stay put, so after swapping shelf 1
-   *  with shelf 2 the second one reads as "Shelf 2" sitting on top — the whole
-   *  shelf appears to have moved, which is what a swap should look like. */
+  /** Exchange the products of two inner shelves. Labels stay with the POSITION,
+   *  never with the products: the top shelf is always "Shelf 1", so the saved
+   *  JSON the detection system reads is numbered top-to-bottom 1..n. */
   swapRowContents: (shelfId: string, rowIdA: string, rowIdB: string) => void;
 
   reset: () => void;
@@ -1004,19 +1003,11 @@ export const useEditorStore = create<EditorState>()(
           else if (p.rowId === rowIdB) p.rowId = rowIdA;
         }
 
-        // The look of the shelf travels with its products; only the slot in the
-        // list (id, index, x, width) belongs to the position rather than to the
-        // shelf, so those stay behind.
-        const swap = <K extends keyof ShelfRow>(k: K) => {
-          const tmp = a[k];
-          a[k] = b[k];
-          b[k] = tmp;
-        };
-        swap("label");
-        swap("heightMm");
-        swap("backgroundColor");
-        swap("borderColor");
-        swap("borderWidthPx");
+        // Height swaps so the products still fit the shelf they moved to; the
+        // label does NOT — see the doc comment.
+        const h = a.heightMm;
+        a.heightMm = b.heightMm;
+        b.heightMm = h;
 
         markEdit(s);
       }),
