@@ -85,9 +85,23 @@ export function PlaceProductModal({ pending, onClose, onConfirm }: Props) {
 
   const metrics = arrangementMetrics(product, arrangement);
 
+  function confirm() {
+    onConfirm({ ...pending!, arrangement, rotationDeg: rotation });
+  }
+
+  /** Enter anywhere in the form places the units, so the count inputs can be
+   *  typed and committed without reaching for the mouse. Buttons are skipped —
+   *  Cancel and the arrangement radios keep their own Enter behaviour. */
+  function onKeyDown(e: React.KeyboardEvent) {
+    if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
+    if ((e.target as HTMLElement).tagName === "BUTTON") return;
+    e.preventDefault();
+    confirm();
+  }
+
   return (
     <Dialog open={!!pending} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="max-w-xl" onKeyDown={onKeyDown}>
         <DialogHeader>
           <div className="flex items-center gap-3">
             <div
@@ -200,11 +214,11 @@ export function PlaceProductModal({ pending, onClose, onConfirm }: Props) {
         </div>
 
         <DialogFooter>
+          <span className="mr-auto self-center text-[11px] text-slate-400">
+            Press Enter to place
+          </span>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button
-            variant="primary"
-            onClick={() => onConfirm({ ...pending, arrangement, rotationDeg: rotation })}
-          >
+          <Button variant="primary" onClick={confirm}>
             Place {metrics.totalUnits} unit{metrics.totalUnits === 1 ? "" : "s"}
           </Button>
         </DialogFooter>

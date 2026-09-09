@@ -17,6 +17,7 @@ import type { TenantProduct } from "@/lib/catalog/types";
 import { useEditorStore } from "@/lib/store/editorStore";
 import { useCatalogStore } from "@/lib/store/catalogStore";
 import { defaultArrangement } from "@/lib/arrangement";
+import { placementSize, restingYMm } from "@/lib/placementGeometry";
 import { Toolbar, type ToolbarUser, type ToolbarTenant } from "./Toolbar";
 import { CanvasToolbar } from "./CanvasToolbar";
 import { LeftPanel } from "./LeftPanel/LeftPanel";
@@ -131,18 +132,39 @@ export default function EditorShell({
     if (!activeData) return;
 
     // Compute drop coords. xMm = where the LEFT edge of the placement should go inside the row.
-    // yMm always 0 so products sit cleanly on the row's floor (organized look).
+    // yMm = how high above the row floor its BOTTOM edge sits, snapped either to
+    // the floor or onto the top of whatever product was dropped on — that is how
+    // two different products get stacked.
     const overRect = over.rect;
     const activeRect = active.rect.current.translated;
     let xMm = 20;
-    const yMm = 0;
+    let rawYMm = 0;
     if (overRect && activeRect) {
       const PX_PER_MM = 1.5 * zoom;
       xMm = Math.max(0, (activeRect.left - overRect.left) / PX_PER_MM);
       // Clamp inside the row so it doesn't overflow on the right.
       const maxXMm = Math.max(0, overRect.width / PX_PER_MM - 10);
       xMm = Math.min(xMm, maxXMm);
+      // Screen y grows downwards, shelf y grows upwards from the row floor.
+      rawYMm = Math.max(0, (overRect.top + overRect.height - activeRect.bottom) / PX_PER_MM);
     }
+
+    const movingId =
+      activeData.kind === "placement" && activeDrag?.kind === "placement" && !activeDrag.duplicate
+        ? activeData.placementId
+        : null;
+    const siblings = placements
+      .filter(
+        (p) =>
+          p.shelfId === overData.shelfId &&
+          p.rowId === overData.rowId &&
+          p.instanceId !== movingId,
+      )
+      .flatMap((p) => {
+        const prod = getProduct(p.productId);
+        return prod ? [{ placement: p, size: placementSize(prod, p) }] : [];
+      });
+    const yMm = restingYMm(xMm, rawYMm, siblings);
 
     if (activeData.kind === "product") {
       const product = getProduct(activeData.productId);

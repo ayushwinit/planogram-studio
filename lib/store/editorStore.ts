@@ -37,6 +37,16 @@ const INNER_SHELF_DEFAULTS = {
 
 const MAX_INNER_SHELVES = 10;
 
+// Auto-fit tuning. Clearance is the headroom deliberately left above the
+// tallest product so a row never looks packed to the ceiling; the gap bounds
+// keep products from either touching or drifting apart on a half-empty row.
+const AUTOFIT_CLEARANCE_MM = 2;
+const AUTOFIT_MIN_GAP_MM = 4;
+const AUTOFIT_MAX_GAP_MM = 20;
+// Mirrors SCALE_MIN in PlacedProductView so auto-fit can't produce a size the
+// user is then unable to drag back.
+const AUTOFIT_MIN_SCALE = 0.2;
+
 // Shelves are sized in real-world mm, so a freshly created 800mm-wide unit at
 // 1:1 (100%) overflows the typical viewport. 50% lets the whole shelf fit on
 // screen without the user having to zoom out manually.
@@ -206,6 +216,14 @@ interface EditorState {
   removePlacement: (id: string) => void;
   /** Bulk delete — used by multi-select Delete. */
   removePlacements: (ids: string[]) => void;
+
+  /** Tidy every row of one shelf in a single click: scale each placement
+   *  uniformly so it clears its row height, shrink the whole row by one common
+   *  factor if it still overflows the row width, then re-flow left-to-right
+   *  with even gaps, sitting on the shelf floor. Unit counts (rows x cols) and
+   *  the existing left-to-right order are never changed. Returns the number of
+   *  placements it touched. */
+  autoFitShelf: (shelfId: string) => number;
 
   /** Snapshot the currently selected placements into the clipboard. Returns
    *  the number of entries captured (0 if no placement selection). */
@@ -618,6 +636,107 @@ export const useEditorStore = create<EditorState>()(
           s.selection = next.length === 0 ? { kind: "none" } : { kind: "placement", ids: next };
         }
       }),
+
+    autoFitShelf: (shelfId) => {
+      let touched = 0;
+      set((s) => {
+        const shelf = s.planogram.shelves.find((sh) => sh.id === shelfId);
+        if (!shelf) return;
+        const catalog = useCatalogStore.getState().products;
+
+        for (const row of shelf.rows) {
+          const items = s.planogram.placements.filter(
+            (p) => p.shelfId === shelfId && p.rowId === row.id,
+          );
+          if (items.length === 0) continue;
+
+          const sized = items.map((p) => {
+            const raw = catalog.find((c) => c.productId === p.productId);
+            const m = raw ? arrangementMetrics(toEditorProduct(raw), p.arrangement) : null;
+            const sx = p.scaleX ?? p.scale ?? 1;
+            return {
+              p,
+              // Unscaled block size — auto-fit recomputes the scale from scratch.
+              widthMm: m?.totalWidthMm ?? 0,
+              heightMm: m?.totalHeightMm ?? 0,
+              // Current on-shelf width, only used to work out what rests on what.
+              currentWidthMm: (m?.totalWidthMm ?? 0) * sx,
+            };
+          });
+
+          // Group into stacks so a product resting on another travels with it.
+          // Bases sit on the floor; anything higher joins the base underneath its
+          // left edge, and the members are ordered bottom-up.
+          type Stack = { members: typeof sized; xMm: number };
+          const bases = sized
+            .filter((it) => it.p.yMm < 1)
+            .sort((a, b) => a.p.xMm - b.p.xMm);
+          const stacks: Stack[] = bases.map((b) => ({ members: [b], xMm: b.p.xMm }));
+          for (const it of sized.filter((x) => x.p.yMm >= 1).sort((a, b) => a.p.yMm - b.p.yMm)) {
+            const host = stacks.find((st) => {
+              const base = st.members[0];
+              return it.p.xMm >= base.p.xMm - 1 && it.p.xMm <= base.p.xMm + base.currentWidthMm + 1;
+            });
+            // An orphan (nothing underneath it) becomes a stack of its own and
+            // is dropped back to the floor.
+            if (host) host.members.push(it);
+            else stacks.push({ members: [it], xMm: it.p.xMm });
+          }
+          stacks.sort((a, b) => a.xMm - b.xMm);
+
+          // One scale per stack: the whole column has to clear the row height, and
+          // a shared scale keeps the products' relative sizes honest. Capped at 1
+          // so a small pack is never blown up to look like a big one.
+          const availHeightMm = Math.max(1, row.heightMm - AUTOFIT_CLEARANCE_MM);
+          const scales = stacks.map((st) => {
+            const stackHeightMm = st.members.reduce((sum, m) => sum + m.heightMm, 0);
+            return stackHeightMm > 0 ? Math.min(1, availHeightMm / stackHeightMm) : 1;
+          });
+
+          // A second, row-wide shrink if the stacks still overflow horizontally.
+          const stackWidth = (i: number) =>
+            Math.max(...stacks[i].members.map((m) => m.widthMm)) * scales[i];
+          const gapsMm = AUTOFIT_MIN_GAP_MM * (stacks.length + 1);
+          const usedMm = stacks.reduce((sum, _, i) => sum + stackWidth(i), 0);
+          if (usedMm > 0 && usedMm + gapsMm > row.widthMm) {
+            const factor = Math.max(0, row.widthMm - gapsMm) / usedMm;
+            for (let i = 0; i < scales.length; i++) {
+              scales[i] = Math.max(AUTOFIT_MIN_SCALE, scales[i] * factor);
+            }
+          }
+          for (let i = 0; i < scales.length; i++) scales[i] = Math.round(scales[i] * 100) / 100;
+
+          const finalUsedMm = stacks.reduce((sum, _, i) => sum + stackWidth(i), 0);
+          const gapMm = Math.min(
+            AUTOFIT_MAX_GAP_MM,
+            Math.max(AUTOFIT_MIN_GAP_MM, (row.widthMm - finalUsedMm) / (stacks.length + 1)),
+          );
+
+          let xMm = gapMm;
+          for (let i = 0; i < stacks.length; i++) {
+            const scale = scales[i];
+            const slotWidthMm = stackWidth(i);
+            let yMm = 0;
+            for (const m of stacks[i].members) {
+              // Narrower members sit centred on the one below rather than
+              // left-aligned, which is how a real stack looks.
+              const offsetMm = (slotWidthMm - m.widthMm * scale) / 2;
+              m.p.xMm = Math.round((xMm + offsetMm) * 100) / 100;
+              m.p.yMm = Math.round(yMm * 100) / 100;
+              m.p.scaleX = scale;
+              m.p.scaleY = scale;
+              // Legacy uniform scale would otherwise win on old placements.
+              delete m.p.scale;
+              yMm += m.heightMm * scale;
+              touched++;
+            }
+            xMm += slotWidthMm + gapMm;
+          }
+        }
+        if (touched > 0) markEdit(s);
+      });
+      return touched;
+    },
 
     copySelectionToClipboard: () => {
       const state = get();

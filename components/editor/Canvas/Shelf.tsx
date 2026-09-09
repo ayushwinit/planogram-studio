@@ -1,6 +1,7 @@
 "use client";
 import * as React from "react";
 import { useDroppable } from "@dnd-kit/core";
+import { Wand2 } from "lucide-react";
 import { useEditorStore } from "@/lib/store/editorStore";
 import { mmToPx, pxToMm } from "@/lib/units";
 import type { RowSlot, Shelf as ShelfModel, ShelfRow as ShelfRowModel } from "@/lib/types";
@@ -18,6 +19,7 @@ export function Shelf({ shelf }: Props) {
   const selection = useEditorStore((s) => s.selection);
   const updateShelf = useEditorStore((s) => s.updateShelf);
   const setShelfTotalHeight = useEditorStore((s) => s.setShelfTotalHeight);
+  const autoFitShelf = useEditorStore((s) => s.autoFitShelf);
 
   const isSelected = selection.kind === "shelf" && selection.id === shelf.id;
   const totalHeightMm = shelfTotalHeightMm(shelf);
@@ -149,6 +151,22 @@ export function Shelf({ shelf }: Props) {
         <span>{shelf.label ?? "Shelf unit"}</span>
         <span className="opacity-60 ml-1">· {Math.round(shelf.widthMm)}mm</span>
       </div>
+
+      {/* Auto-fit — one click tidies every row of this shelf. Sits on the label
+          rail so it never covers the shelf surface or a placement. */}
+      <button
+        type="button"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          autoFitShelf(shelf.id);
+        }}
+        className="editor-only absolute -top-5 right-0 h-4 px-1.5 flex items-center gap-1 rounded border border-slate-300 bg-white text-[10px] font-medium text-slate-600 shadow-sm hover:border-indigo-400 hover:text-indigo-600"
+        title="Auto-fit: resize and align every product on this shelf (unit counts unchanged)"
+      >
+        <Wand2 className="h-2.5 w-2.5" />
+        Auto-fit
+      </button>
 
       {/* Top placement area */}
       {shelf.topAreaMm > 0 ? (
