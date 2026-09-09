@@ -1,6 +1,6 @@
 "use client";
 import * as React from "react";
-import { Plus, ZoomIn, ZoomOut, Eraser } from "lucide-react";
+import { Plus, ZoomIn, ZoomOut, Eraser, Undo2, Redo2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
 import { useEditorStore, MAX_INNER_SHELVES_LIMIT } from "@/lib/store/editorStore";
@@ -15,6 +15,10 @@ export function CanvasToolbar() {
   const resetView = useEditorStore((s) => s.resetView);
   const reset = useEditorStore((s) => s.reset);
   const placementCount = useEditorStore((s) => s.planogram.placements.length);
+  const undo = useEditorStore((s) => s.undo);
+  const redo = useEditorStore((s) => s.redo);
+  const canUndo = useEditorStore((s) => s.past.length > 0);
+  const canRedo = useEditorStore((s) => s.future.length > 0);
 
   const outerShelf = shelves[0];
   const hasShelf = !!outerShelf;
@@ -58,6 +62,25 @@ export function CanvasToolbar() {
           </TooltipTrigger>
           <TooltipContent>{primaryTooltip}</TooltipContent>
         </Tooltip>
+
+        <div className="flex items-center gap-0.5 rounded-md border border-slate-200 bg-white">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button size="icon-sm" variant="ghost" onClick={undo} disabled={!canUndo} aria-label="Undo">
+                <Undo2 className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Undo (Ctrl+Z)</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button size="icon-sm" variant="ghost" onClick={redo} disabled={!canRedo} aria-label="Redo">
+                <Redo2 className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Redo (Ctrl+Shift+Z)</TooltipContent>
+          </Tooltip>
+        </div>
 
         {hasShelf ? (
           <span className="text-xs text-slate-500 tabular-nums">

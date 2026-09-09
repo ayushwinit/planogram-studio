@@ -266,8 +266,10 @@ interface EditorState {
     replaceExisting: boolean;
   }) => number;
 
-  /** Exchange the contents of two inner shelves. The shelves themselves stay
-   *  where they are — only the products trade places. */
+  /** Exchange two inner shelves: their products AND their identity (label,
+   *  height, colours). The list positions stay put, so after swapping shelf 1
+   *  with shelf 2 the second one reads as "Shelf 2" sitting on top — the whole
+   *  shelf appears to have moved, which is what a swap should look like. */
   swapRowContents: (shelfId: string, rowIdA: string, rowIdB: string) => void;
 
   reset: () => void;
@@ -990,20 +992,33 @@ export const useEditorStore = create<EditorState>()(
     swapRowContents: (shelfId, rowIdA, rowIdB) =>
       set((s) => {
         if (rowIdA === rowIdB) return;
-        let moved = 0;
+        const shelf = s.planogram.shelves.find((sh) => sh.id === shelfId);
+        if (!shelf) return;
+        const a = shelf.rows.find((r) => r.id === rowIdA);
+        const b = shelf.rows.find((r) => r.id === rowIdB);
+        if (!a || !b) return;
+
         for (const p of s.planogram.placements) {
           if (p.shelfId !== shelfId) continue;
-          if (p.rowId === rowIdA) {
-            p.rowId = rowIdB;
-            moved++;
-          } else if (p.rowId === rowIdB) {
-            p.rowId = rowIdA;
-            moved++;
-          }
+          if (p.rowId === rowIdA) p.rowId = rowIdB;
+          else if (p.rowId === rowIdB) p.rowId = rowIdA;
         }
-        // Shelves can differ in height, so anything that no longer fits is left
-        // to the user (or Auto-fit) to resolve rather than silently rescaled.
-        if (moved > 0) markEdit(s);
+
+        // The look of the shelf travels with its products; only the slot in the
+        // list (id, index, x, width) belongs to the position rather than to the
+        // shelf, so those stay behind.
+        const swap = <K extends keyof ShelfRow>(k: K) => {
+          const tmp = a[k];
+          a[k] = b[k];
+          b[k] = tmp;
+        };
+        swap("label");
+        swap("heightMm");
+        swap("backgroundColor");
+        swap("borderColor");
+        swap("borderWidthPx");
+
+        markEdit(s);
       }),
 
     reset: () =>

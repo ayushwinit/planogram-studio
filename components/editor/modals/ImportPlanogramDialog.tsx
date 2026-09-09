@@ -25,6 +25,7 @@ import { cn } from "@/lib/cn";
 import { useEditorStore, MAX_INNER_SHELVES_LIMIT } from "@/lib/store/editorStore";
 import { useCatalogStore, toEditorProduct } from "@/lib/store/catalogStore";
 import { placementSize } from "@/lib/placementGeometry";
+import { arrangementMetrics } from "@/lib/arrangement";
 import {
   listPlanograms,
   listPlanogramBrands,
@@ -679,26 +680,34 @@ function ShelfStrip({
         // source shelf, so show a grey block rather than dropping it silently.
         const widthPct = size ? (size.widthMm / row.widthMm) * 100 : 4;
         const heightPct = size ? Math.min(100, (size.heightMm / row.heightMm) * 100) : 40;
+        // A placement is a block of N units, not one — draw every facing, the
+        // way the canvas does, so 26 cans read as 26 cans here too.
+        const m = product ? arrangementMetrics(product, p.arrangement) : null;
         return (
           <div
             key={p.instanceId}
-            className="absolute"
+            className="absolute grid"
             style={{
               left: `${(p.xMm / row.widthMm) * 100}%`,
               bottom: `${(p.yMm / row.heightMm) * 100}%`,
               width: `${widthPct}%`,
               height: `${heightPct}%`,
+              gridTemplateColumns: `repeat(${m?.cols ?? 1}, 1fr)`,
+              gridTemplateRows: `repeat(${m?.rows ?? 1}, 1fr)`,
             }}
           >
-            {product ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={product.imageUrl}
-                alt={product.name}
-                title={product.name}
-                className="w-full h-full object-contain"
-                draggable={false}
-              />
+            {product && m ? (
+              Array.from({ length: m.rows * m.cols }, (_, i) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={i}
+                  src={product.imageUrl}
+                  alt={i === 0 ? product.name : ""}
+                  title={`${product.name} — ${m.totalUnits} units`}
+                  className="w-full h-full object-contain"
+                  draggable={false}
+                />
+              ))
             ) : (
               <div className="w-full h-full bg-slate-300 rounded-sm" />
             )}
