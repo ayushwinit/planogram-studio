@@ -219,6 +219,8 @@ export default function EditorShell({
   const removePlacements = useEditorStore((s) => s.removePlacements);
   const updatePlacement = useEditorStore((s) => s.updatePlacement);
   const copySelectionToClipboard = useEditorStore((s) => s.copySelectionToClipboard);
+  const undo = useEditorStore((s) => s.undo);
+  const redo = useEditorStore((s) => s.redo);
   const pasteClipboardTo = useEditorStore((s) => s.pasteClipboardTo);
   const duplicateSelection = useEditorStore((s) => s.duplicateSelection);
   const clipboard = useEditorStore((s) => s.clipboard);
@@ -284,6 +286,18 @@ export default function EditorShell({
         }
         return;
       }
+      if (mod && !e.altKey && (e.key === "z" || e.key === "Z")) {
+        // Ctrl+Shift+Z redoes, matching every other design tool.
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+        return;
+      }
+      if (mod && !e.shiftKey && !e.altKey && (e.key === "y" || e.key === "Y")) {
+        e.preventDefault();
+        redo();
+        return;
+      }
       if (mod && !e.shiftKey && !e.altKey && (e.key === "d" || e.key === "D")) {
         // Ctrl+D is "Bookmark this page" in browsers — always preventDefault so
         // the bookmark dialog doesn't pop up and steal focus, even if there's
@@ -342,6 +356,8 @@ export default function EditorShell({
     pasteClipboardTo,
     duplicateSelection,
     closeContextMenu,
+    undo,
+    redo,
   ]);
 
   // For DragOverlay

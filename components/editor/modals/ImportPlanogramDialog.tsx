@@ -70,6 +70,12 @@ export function ImportPlanogramDialog({
   const [customers, setCustomers] = React.useState<string[]>([]);
   const [isLoading, startLoadingTransition] = React.useTransition();
   const [importing, setImporting] = React.useState<string | null>(null);
+  // Second step: a loaded source waiting for the user to tick which of its
+  // shelves to bring over. Null while the grid of planograms is showing.
+  const [picker, setPicker] = React.useState<
+    { summary: PlanogramSummary; planogram: import("@/lib/types").Planogram } | null
+  >(null);
+  const [pickedRowIds, setPickedRowIds] = React.useState<string[]>([]);
 
   // Reset to fresh state every time the dialog opens (false → true) so
   // re-opening doesn't show stale data from the previous session.
@@ -144,16 +150,37 @@ export function ImportPlanogramDialog({
         toast.error("Source planogram could not be loaded.");
         return;
       }
-      importFromPlanogram(record.planogramData);
-      toast.success(`Imported from "${p.planogramName}"`, {
-        description: `${record.planogramData.shelves.length} shelf unit(s), ${record.planogramData.placements.length} placement(s).`,
-      });
-      onClose();
+      const rows = record.planogramData.shelves.flatMap((sh) => sh.rows);
+      // Nothing to choose between when the source has a single shelf.
+      if (rows.length <= 1) {
+        applyImport(p, record.planogramData);
+        return;
+      }
+      setPicker({ summary: p, planogram: record.planogramData });
+      setPickedRowIds(rows.map((r) => r.id));
     } catch (err) {
       toast.error("Import failed", { description: (err as Error).message });
     } finally {
       setImporting(null);
     }
+  }
+
+  function applyImport(
+    p: PlanogramSummary,
+    source: import("@/lib/types").Planogram,
+    rowIds?: string[],
+  ) {
+    const kept = rowIds ? new Set(rowIds) : null;
+    const placementCount = kept
+      ? source.placements.filter((pl) => kept.has(pl.rowId)).length
+      : source.placements.length;
+    const shelfCount = kept ? kept.size : source.shelves.flatMap((sh) => sh.rows).length;
+    importFromPlanogram(source, rowIds);
+    toast.success(`Imported from “${p.planogramName}”`, {
+      description: `${shelfCount} shelf(s), ${placementCount} placement(s).`,
+    });
+    setPicker(null);
+    onClose();
   }
 
   const active = activeFilterCount(filters);
@@ -190,7 +217,16 @@ export function ImportPlanogramDialog({
             isLoading && "opacity-60 pointer-events-none",
           )}
         >
-          {planograms.length === 0 ? (
+          {picker ? (
+            <ShelfPicker
+              source={picker.planogram}
+              sourceName={picker.summary.planogramName}
+              picked={pickedRowIds}
+              setPicked={setPickedRowIds}
+              onBack={() => setPicker(null)}
+              onConfirm={() => applyImport(picker.summary, picker.planogram, pickedRowIds)}
+            />
+          ) : planograms.length === 0 ? (
             <EmptyState
               filtered={active > 0}
               onReset={() => commit(EMPTY_FILTERS)}
@@ -458,6 +494,93 @@ function ImportCard({
         >
           {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
           {importing ? "Importing…" : "Import"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** Step two of the import: which of the source planogram's shelves to bring
+ *  over. Defaults to all of them, so the old one-click behaviour is still a
+ *  single extra click away. */
+function ShelfPicker({
+  source,
+  sourceName,
+  picked,
+  setPicked,
+  onBack,
+  onConfirm,
+}: {
+  source: import("@/lib/types").Planogram;
+  sourceName: string;
+  picked: string[];
+  setPicked: (ids: string[]) => void;
+  onBack: () => void;
+  onConfirm: () => void;
+}) {
+  const rows = source.shelves.flatMap((sh) => sh.rows);
+  const countFor = (rowId: string) => source.placements.filter((p) => p.rowId === rowId).length;
+  const allPicked = picked.length === rows.length;
+
+  function toggle(rowId: string) {
+    setPicked(picked.includes(rowId) ? picked.filter((id) => id !== rowId) : [...picked, rowId]);
+  }
+
+  return (
+    <div className="max-w-lg mx-auto">
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <div className="min-w-0">
+          <h3 className="text-sm font-medium text-slate-900 truncate">{sourceName}</h3>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Choose the shelves to import. Everything on the canvas is replaced.
+          </p>
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setPicked(allPicked ? [] : rows.map((r) => r.id))}
+        >
+          {allPicked ? "Clear all" : "Select all"}
+        </Button>
+      </div>
+
+      <div className="space-y-1.5">
+        {rows.map((row, i) => {
+          const checked = picked.includes(row.id);
+          return (
+            <label
+              key={row.id}
+              className={cn(
+                "flex items-center gap-2.5 rounded-md border px-3 py-2 cursor-pointer transition-colors",
+                checked
+                  ? "border-indigo-400 bg-indigo-50/40"
+                  : "border-slate-200 bg-white hover:border-slate-300",
+              )}
+            >
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={() => toggle(row.id)}
+                className="h-3.5 w-3.5 accent-indigo-600"
+              />
+              <span className="flex-1 text-xs font-medium text-slate-700 truncate">
+                {row.label ?? `Shelf ${i + 1}`}
+              </span>
+              <span className="text-[11px] tabular-nums text-slate-400">
+                {countFor(row.id)} placements · {Math.round(row.heightMm)}mm
+              </span>
+            </label>
+          );
+        })}
+      </div>
+
+      <div className="flex justify-end gap-2 pt-4">
+        <Button variant="ghost" size="sm" onClick={onBack}>
+          Back
+        </Button>
+        <Button variant="primary" size="sm" disabled={picked.length === 0} onClick={onConfirm} className="gap-1.5">
+          <Download className="h-4 w-4" />
+          Import {picked.length} shelf{picked.length === 1 ? "" : "s"}
         </Button>
       </div>
     </div>

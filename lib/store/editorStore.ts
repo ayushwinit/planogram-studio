@@ -47,6 +47,12 @@ const AUTOFIT_MAX_GAP_MM = 20;
 // user is then unable to drag back.
 const AUTOFIT_MIN_SCALE = 0.2;
 
+/** How many planogram snapshots Ctrl+Z can walk back through. */
+const HISTORY_LIMIT = 50;
+/** Set while undo/redo is swapping the planogram, so the history subscription
+ *  doesn't record that swap as a fresh edit. */
+let applyingHistory = false;
+
 // Shelves are sized in real-world mm, so a freshly created 800mm-wide unit at
 // 1:1 (100%) overflows the typical viewport. 50% lets the whole shelf fit on
 // screen without the user having to zoom out manually.
@@ -157,7 +163,9 @@ interface EditorState {
    *  with those from another planogram. Identity fields (id, name, customer)
    *  are preserved so the user is still editing the same record. IDs of the
    *  imported nodes are regenerated to avoid collisions. */
-  importFromPlanogram: (source: Planogram) => void;
+  /** Replace the canvas with a copy of `source`. Pass `rowIds` to bring over
+   *  only those inner shelves (and their placements); omit it for the lot. */
+  importFromPlanogram: (source: Planogram, rowIds?: string[]) => void;
   markSaved: (savedAt: string, planogramSlug?: string) => void;
   setCustomerName: (s: string) => void;
 
@@ -254,7 +262,18 @@ interface EditorState {
     replaceExisting: boolean;
   }) => number;
 
+  /** Exchange the contents of two inner shelves. The shelves themselves stay
+   *  where they are — only the products trade places. */
+  swapRowContents: (shelfId: string, rowIdA: string, rowIdB: string) => void;
+
   reset: () => void;
+
+  /** Previous / redoable planogram snapshots, newest last in `past`. Captured
+   *  automatically by the subscription below — no action pushes to them. */
+  past: Planogram[];
+  future: Planogram[];
+  undo: () => void;
+  redo: () => void;
 }
 
 export const useEditorStore = create<EditorState>()(
@@ -275,9 +294,43 @@ export const useEditorStore = create<EditorState>()(
     panX: 80,
     panY: 80,
     hoverDropTarget: null,
+    past: [],
+    future: [],
 
-    hydrate: (input) =>
+    undo: () => {
+      const { past, planogram, future } = get();
+      if (past.length === 0) return;
+      applyingHistory = true;
       set((s) => {
+        s.past = past.slice(0, -1);
+        s.future = [planogram, ...future].slice(0, HISTORY_LIMIT);
+        s.planogram = past[past.length - 1];
+        s.selection = { kind: "none" };
+        s.dirtySinceSave = true;
+      });
+      applyingHistory = false;
+    },
+
+    redo: () => {
+      const { past, planogram, future } = get();
+      if (future.length === 0) return;
+      applyingHistory = true;
+      set((s) => {
+        s.past = [...past, planogram].slice(-HISTORY_LIMIT);
+        s.future = future.slice(1);
+        s.planogram = future[0];
+        s.selection = { kind: "none" };
+        s.dirtySinceSave = true;
+      });
+      applyingHistory = false;
+    },
+
+    // Loading a saved planogram is not an edit — it starts a fresh history.
+    hydrate: (input) => {
+      applyingHistory = true;
+      set((s) => {
+        s.past = [];
+        s.future = [];
         s.planogram = input.planogram;
         s.planogramId = input.planogramId;
         s.tenantSlug = input.tenantSlug;
@@ -289,10 +342,15 @@ export const useEditorStore = create<EditorState>()(
         s.zoom = DEFAULT_ZOOM;
         s.panX = 80;
         s.panY = 80;
-      }),
+      });
+      applyingHistory = false;
+    },
 
-    importFromPlanogram: (source) =>
+    importFromPlanogram: (source, rowIds) =>
       set((s) => {
+        // Undefined means "everything"; an explicit list narrows the import to
+        // the shelves the user ticked, renumbering so they stay 1..n.
+        const wanted = rowIds ? new Set(rowIds) : null;
         // Regenerate every shelf / row / placement id so the imported nodes
         // can't collide with anything that referenced the original IDs (e.g.
         // if the user imports the same source twice). Placements need their
@@ -303,11 +361,13 @@ export const useEditorStore = create<EditorState>()(
         const newShelves = source.shelves.map((shelf) => {
           const newShelfId = nanoid();
           shelfIdMap.set(shelf.id, newShelfId);
-          const newRows = shelf.rows.map((row) => {
-            const newRowId = nanoid();
-            rowIdMap.set(row.id, newRowId);
-            return { ...row, id: newRowId };
-          });
+          const newRows = shelf.rows
+            .filter((row) => !wanted || wanted.has(row.id))
+            .map((row, i) => {
+              const newRowId = nanoid();
+              rowIdMap.set(row.id, newRowId);
+              return { ...row, id: newRowId, index: i };
+            });
           return { ...shelf, id: newShelfId, rows: newRows };
         });
 
@@ -891,6 +951,25 @@ export const useEditorStore = create<EditorState>()(
       return created;
     },
 
+    swapRowContents: (shelfId, rowIdA, rowIdB) =>
+      set((s) => {
+        if (rowIdA === rowIdB) return;
+        let moved = 0;
+        for (const p of s.planogram.placements) {
+          if (p.shelfId !== shelfId) continue;
+          if (p.rowId === rowIdA) {
+            p.rowId = rowIdB;
+            moved++;
+          } else if (p.rowId === rowIdB) {
+            p.rowId = rowIdA;
+            moved++;
+          }
+        }
+        // Shelves can differ in height, so anything that no longer fits is left
+        // to the user (or Auto-fit) to resolve rather than silently rescaled.
+        if (moved > 0) markEdit(s);
+      }),
+
     reset: () =>
       set((s) => {
         // Wipe canvas content but keep the binding to the saved row, since
@@ -908,5 +987,19 @@ export const useEditorStore = create<EditorState>()(
       }),
   }))
 );
+
+// Every mutating action replaces `planogram` wholesale (immer), so a change in
+// its identity is exactly "an edit happened" — that is the undo checkpoint.
+// Recording here rather than inside each action means no action can forget to.
+useEditorStore.subscribe((state, prev) => {
+  if (applyingHistory) return;
+  if (state.planogram === prev.planogram) return;
+  applyingHistory = true;
+  useEditorStore.setState({
+    past: [...prev.past, prev.planogram].slice(-HISTORY_LIMIT),
+    future: [],
+  });
+  applyingHistory = false;
+});
 
 export const MAX_INNER_SHELVES_LIMIT = MAX_INNER_SHELVES;

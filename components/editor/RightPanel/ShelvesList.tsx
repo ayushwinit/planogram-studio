@@ -12,7 +12,7 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/DropdownMenu";
 import { PropertyRow, PropertySection } from "./PropertyRow";
-import { ChevronDown, Copy, Layers, MoreVertical, Plus, Trash2 } from "lucide-react";
+import { ArrowUpDown, ChevronDown, Copy, Layers, MoreVertical, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { ReplicateShelfModal } from "../modals/ReplicateShelfModal";
 import { toast } from "sonner";
@@ -27,6 +27,7 @@ export function ShelvesList() {
   const selection = useEditorStore((s) => s.selection);
   const placements = useEditorStore((s) => s.planogram.placements);
   const replicateRowContents = useEditorStore((s) => s.replicateRowContents);
+  const swapRowContents = useEditorStore((s) => s.swapRowContents);
 
   const [replicateSourceRowId, setReplicateSourceRowId] = React.useState<string | null>(null);
 
@@ -133,6 +134,14 @@ export function ShelvesList() {
                   rowHasPlacements={rowPlacementCount > 0}
                   onPullFrom={(srcId, replace) => pullFrom(row.id, srcId, replace)}
                   onReplicate={() => setReplicateSourceRowId(row.id)}
+                  onSwap={(otherRowId) => swapRowContents(shelfId, row.id, otherRowId)}
+                  canDelete={shelf.rows.length > 1}
+                  onDelete={() => {
+                    const label = row.label ?? `Shelf ${row.index + 1}`;
+                    if (confirm(`Remove "${label}" and all its placements?`)) {
+                      removeRow(shelfId, row.id);
+                    }
+                  }}
                 />
               </div>
 
@@ -224,15 +233,67 @@ function ShelfRowMenu({
   rowHasPlacements,
   onPullFrom,
   onReplicate,
+  onSwap,
+  canDelete,
+  onDelete,
 }: {
   hasOthers: boolean;
   otherRows: { id: string; label: string; count: number }[];
   rowHasPlacements: boolean;
   onPullFrom: (srcRowId: string, replace: boolean) => void;
   onReplicate: () => void;
+  onSwap: (otherRowId: string) => void;
+  /** False for the last remaining shelf — the unit must keep at least one. */
+  canDelete: boolean;
+  onDelete: () => void;
 }) {
   const [open, setOpen] = React.useState(false);
   const [copyFromOpen, setCopyFromOpen] = React.useState(false);
+  const [swapOpen, setSwapOpen] = React.useState(false);
+
+  // Same two-step pattern as "Copy from", picking the shelf to trade with.
+  if (swapOpen) {
+    return (
+      <DropdownMenu
+        open
+        onOpenChange={(o) => {
+          if (!o) setSwapOpen(false);
+        }}
+      >
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label="Swap with another shelf"
+            className="h-7 w-7 grid place-items-center rounded text-slate-500 hover:bg-slate-100"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <ArrowUpDown className="h-3.5 w-3.5" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-[12rem]">
+          <div className="px-2 py-1 text-[10px] uppercase tracking-wider font-semibold text-slate-400">
+            Swap contents with
+          </div>
+          {otherRows.length === 0 ? (
+            <div className="px-2 py-1.5 text-xs text-slate-500">No other shelves</div>
+          ) : (
+            otherRows.map((r) => (
+              <DropdownMenuItem
+                key={r.id}
+                onSelect={() => {
+                  setSwapOpen(false);
+                  onSwap(r.id);
+                }}
+              >
+                <span className="flex-1 truncate">{r.label}</span>
+                <span className="text-[10px] tabular-nums text-slate-400">{r.count}</span>
+              </DropdownMenuItem>
+            ))
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  }
 
   // The two-step "Copy from → which shelf?" flow is implemented as a second
   // dropdown so we don't need a Radix submenu primitive in this codebase.
@@ -327,6 +388,17 @@ function ShelfRowMenu({
           <Layers className="h-3.5 w-3.5" />
           <span className="flex-1">Replicate to…</span>
         </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!hasOthers}
+          onSelect={(e) => {
+            e.preventDefault();
+            setOpen(false);
+            setSwapOpen(true);
+          }}
+        >
+          <ArrowUpDown className="h-3.5 w-3.5" />
+          <span className="flex-1">Swap with…</span>
+        </DropdownMenuItem>
         {!rowHasPlacements ? (
           <>
             <DropdownMenuSeparator />
@@ -335,6 +407,18 @@ function ShelfRowMenu({
             </div>
           </>
         ) : null}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          disabled={!canDelete}
+          className="text-rose-600 focus:text-rose-600"
+          onSelect={() => {
+            setOpen(false);
+            onDelete();
+          }}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          <span className="flex-1">Delete shelf</span>
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
