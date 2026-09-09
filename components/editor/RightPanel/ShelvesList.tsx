@@ -12,7 +12,7 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/DropdownMenu";
 import { PropertyRow, PropertySection } from "./PropertyRow";
-import { ArrowUpDown, ChevronDown, Copy, Layers, MoreVertical, Plus, Trash2 } from "lucide-react";
+import { ArrowUpDown, ChevronDown, Copy, GripVertical, Layers, MoreVertical, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { ReplicateShelfModal } from "../modals/ReplicateShelfModal";
 import { toast } from "sonner";
@@ -30,6 +30,10 @@ export function ShelvesList() {
   const swapRowContents = useEditorStore((s) => s.swapRowContents);
 
   const [replicateSourceRowId, setReplicateSourceRowId] = React.useState<string | null>(null);
+  // Native HTML5 drag — the canvas already owns a dnd-kit context, and mixing a
+  // second one into the side panel is more trouble than this list is worth.
+  const [dragRowId, setDragRowId] = React.useState<string | null>(null);
+  const [dropRowId, setDropRowId] = React.useState<string | null>(null);
 
   if (!shelf) return null;
   const shelfId = shelf.id;
@@ -80,14 +84,55 @@ export function ShelvesList() {
           return (
             <div
               key={row.id}
+              onDragOver={(e) => {
+                if (!dragRowId || dragRowId === row.id) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                if (dropRowId !== row.id) setDropRowId(row.id);
+              }}
+              onDragLeave={() => {
+                if (dropRowId === row.id) setDropRowId(null);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                const srcId = dragRowId ?? e.dataTransfer.getData("text/plain");
+                setDragRowId(null);
+                setDropRowId(null);
+                if (!srcId || srcId === row.id) return;
+                swapRowContents(shelfId, srcId, row.id);
+                const src = shelf?.rows.find((r) => r.id === srcId);
+                toast.success(
+                  `Swapped ${src?.label ?? "shelf"} with ${row.label ?? "shelf"}`,
+                );
+              }}
               className={cn(
                 "rounded-md border p-2 space-y-2 transition-colors",
-                isRowSelected
+                dragRowId === row.id && "opacity-40",
+                dropRowId === row.id
+                  ? "border-indigo-500 bg-indigo-50 ring-1 ring-indigo-300"
+                  : isRowSelected
                   ? "border-indigo-400 bg-indigo-50/40"
                   : "border-slate-200 bg-white hover:border-slate-300"
               )}
             >
               <div className="flex items-center gap-1">
+                <span
+                  draggable
+                  onDragStart={(e) => {
+                    setDragRowId(row.id);
+                    e.dataTransfer.effectAllowed = "move";
+                    // Firefox refuses to start a drag without a payload.
+                    e.dataTransfer.setData("text/plain", row.id);
+                  }}
+                  onDragEnd={() => {
+                    setDragRowId(null);
+                    setDropRowId(null);
+                  }}
+                  title="Drag onto another shelf to swap their contents"
+                  className="shrink-0 cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500"
+                >
+                  <GripVertical className="h-3.5 w-3.5" />
+                </span>
                 <button
                   type="button"
                   className="flex-1 flex items-center justify-between text-left min-w-0"

@@ -159,13 +159,17 @@ interface EditorState {
   hoverDropTarget: { shelfId: string; rowId: RowSlot } | null;
 
   hydrate: (input: HydrateInput) => void;
-  /** Replace the current planogram's shelves + placements (and canvas size)
-   *  with those from another planogram. Identity fields (id, name, customer)
-   *  are preserved so the user is still editing the same record. IDs of the
-   *  imported nodes are regenerated to avoid collisions. */
-  /** Replace the canvas with a copy of `source`. Pass `rowIds` to bring over
-   *  only those inner shelves (and their placements); omit it for the lot. */
-  importFromPlanogram: (source: Planogram, rowIds?: string[]) => void;
+  /** Copy shelves out of `source` onto this canvas. Pass `rowIds` to bring over
+   *  only those inner shelves (and their placements); omit it for the lot.
+   *  `mode: "append"` keeps what is already on the canvas and adds the incoming
+   *  shelves below it — that is how a planogram is assembled from several
+   *  sources. Returns how many shelves were actually added, which is less than
+   *  asked for when the unit hits MAX_INNER_SHELVES. */
+  importFromPlanogram: (
+    source: Planogram,
+    rowIds?: string[],
+    mode?: "replace" | "append",
+  ) => number;
   markSaved: (savedAt: string, planogramSlug?: string) => void;
   setCustomerName: (s: string) => void;
 
@@ -346,7 +350,8 @@ export const useEditorStore = create<EditorState>()(
       applyingHistory = false;
     },
 
-    importFromPlanogram: (source, rowIds) =>
+    importFromPlanogram: (source, rowIds, mode = "replace") => {
+      let added = 0;
       set((s) => {
         // Undefined means "everything"; an explicit list narrows the import to
         // the shelves the user ticked, renumbering so they stay 1..n.
@@ -382,13 +387,33 @@ export const useEditorStore = create<EditorState>()(
           })
           .filter((p): p is NonNullable<typeof p> => p !== null);
 
-        s.planogram.shelves = newShelves;
-        s.planogram.placements = newPlacements;
-        s.planogram.canvasWidthMm = source.canvasWidthMm;
-        s.planogram.canvasHeightMm = source.canvasHeightMm;
+        const target = s.planogram.shelves[0];
+        if (mode === "append" && target) {
+          // Incoming rows join the existing unit rather than forming a second
+          // one, so they must adopt its id, width and row numbering.
+          const room = MAX_INNER_SHELVES - target.rows.length;
+          const incoming = newShelves.flatMap((sh) => sh.rows).slice(0, Math.max(0, room));
+          const keep = new Set(incoming.map((r) => r.id));
+          for (const row of incoming) {
+            target.rows.push({ ...row, xMm: 0, widthMm: target.widthMm, index: target.rows.length });
+          }
+          for (const p of newPlacements) {
+            if (!keep.has(p.rowId)) continue;
+            s.planogram.placements.push({ ...p, shelfId: target.id });
+          }
+          added = incoming.length;
+        } else {
+          s.planogram.shelves = newShelves;
+          s.planogram.placements = newPlacements;
+          s.planogram.canvasWidthMm = source.canvasWidthMm;
+          s.planogram.canvasHeightMm = source.canvasHeightMm;
+          added = newShelves.reduce((n, sh) => n + sh.rows.length, 0);
+        }
         s.selection = { kind: "none" };
         markEdit(s);
-      }),
+      });
+      return added;
+    },
 
     markSaved: (savedAt, planogramSlug) =>
       set((s) => {

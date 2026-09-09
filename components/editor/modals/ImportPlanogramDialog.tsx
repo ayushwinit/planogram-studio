@@ -22,7 +22,9 @@ import {
 import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
 import { cn } from "@/lib/cn";
-import { useEditorStore } from "@/lib/store/editorStore";
+import { useEditorStore, MAX_INNER_SHELVES_LIMIT } from "@/lib/store/editorStore";
+import { useCatalogStore, toEditorProduct } from "@/lib/store/catalogStore";
+import { placementSize } from "@/lib/placementGeometry";
 import {
   listPlanograms,
   listPlanogramBrands,
@@ -61,6 +63,9 @@ export function ImportPlanogramDialog({
 }) {
   const importFromPlanogram = useEditorStore((s) => s.importFromPlanogram);
   const currentPlanogramId = useEditorStore((s) => s.planogramId);
+  const currentShelfCount = useEditorStore(
+    (s) => s.planogram.shelves.reduce((n, sh) => n + sh.rows.length, 0),
+  );
 
   const [filters, setFilters] = React.useState<FilterValues>(EMPTY_FILTERS);
   const [committedFilters, setCommittedFilters] = React.useState<PlanogramListFilters>({});
@@ -151,8 +156,9 @@ export function ImportPlanogramDialog({
         return;
       }
       const rows = record.planogramData.shelves.flatMap((sh) => sh.rows);
-      // Nothing to choose between when the source has a single shelf.
-      if (rows.length <= 1) {
+      // Nothing to choose between when the source has one shelf AND there is
+      // nothing on the canvas that a replace would destroy.
+      if (rows.length <= 1 && currentShelfCount === 0) {
         applyImport(p, record.planogramData);
         return;
       }
@@ -169,16 +175,29 @@ export function ImportPlanogramDialog({
     p: PlanogramSummary,
     source: import("@/lib/types").Planogram,
     rowIds?: string[],
+    mode: "replace" | "append" = "replace",
   ) {
     const kept = rowIds ? new Set(rowIds) : null;
     const placementCount = kept
       ? source.placements.filter((pl) => kept.has(pl.rowId)).length
       : source.placements.length;
-    const shelfCount = kept ? kept.size : source.shelves.flatMap((sh) => sh.rows).length;
-    importFromPlanogram(source, rowIds);
-    toast.success(`Imported from “${p.planogramName}”`, {
-      description: `${shelfCount} shelf(s), ${placementCount} placement(s).`,
-    });
+    const asked = kept ? kept.size : source.shelves.flatMap((sh) => sh.rows).length;
+    const added = importFromPlanogram(source, rowIds, mode);
+    if (added === 0) {
+      toast.error("Nothing imported", {
+        description: `This planogram already has the maximum of ${MAX_INNER_SHELVES_LIMIT} shelves.`,
+      });
+      return;
+    }
+    toast.success(
+      `${mode === "append" ? "Added" : "Imported"} from “${p.planogramName}”`,
+      {
+        description:
+          added < asked
+            ? `${added} of ${asked} shelves — the rest didn't fit (max 10).`
+            : `${added} shelf(s), ${placementCount} placement(s).`,
+      },
+    );
     setPicker(null);
     onClose();
   }
@@ -224,7 +243,10 @@ export function ImportPlanogramDialog({
               picked={pickedRowIds}
               setPicked={setPickedRowIds}
               onBack={() => setPicker(null)}
-              onConfirm={() => applyImport(picker.summary, picker.planogram, pickedRowIds)}
+              onConfirm={(mode) =>
+                applyImport(picker.summary, picker.planogram, pickedRowIds, mode)
+              }
+              currentShelfCount={currentShelfCount}
             />
           ) : planograms.length === 0 ? (
             <EmptyState
@@ -510,17 +532,22 @@ function ShelfPicker({
   setPicked,
   onBack,
   onConfirm,
+  currentShelfCount,
 }: {
   source: import("@/lib/types").Planogram;
   sourceName: string;
   picked: string[];
   setPicked: (ids: string[]) => void;
   onBack: () => void;
-  onConfirm: () => void;
+  onConfirm: (mode: "replace" | "append") => void;
+  /** Inner shelves already on the canvas — decides whether appending is even
+   *  on offer, and how much room is left. */
+  currentShelfCount: number;
 }) {
   const rows = source.shelves.flatMap((sh) => sh.rows);
   const countFor = (rowId: string) => source.placements.filter((p) => p.rowId === rowId).length;
   const allPicked = picked.length === rows.length;
+  const roomLeft = Math.max(0, MAX_INNER_SHELVES_LIMIT - currentShelfCount);
 
   function toggle(rowId: string) {
     setPicked(picked.includes(rowId) ? picked.filter((id) => id !== rowId) : [...picked, rowId]);
@@ -532,7 +559,7 @@ function ShelfPicker({
         <div className="min-w-0">
           <h3 className="text-sm font-medium text-slate-900 truncate">{sourceName}</h3>
           <p className="text-xs text-slate-500 mt-0.5">
-            Choose the shelves to import. Everything on the canvas is replaced.
+            Choose the shelves, then add them to this planogram or replace it.
           </p>
         </div>
         <Button
@@ -551,38 +578,133 @@ function ShelfPicker({
             <label
               key={row.id}
               className={cn(
-                "flex items-center gap-2.5 rounded-md border px-3 py-2 cursor-pointer transition-colors",
+                "block rounded-md border px-3 py-2 cursor-pointer transition-colors",
                 checked
                   ? "border-indigo-400 bg-indigo-50/40"
                   : "border-slate-200 bg-white hover:border-slate-300",
               )}
             >
-              <input
-                type="checkbox"
-                checked={checked}
-                onChange={() => toggle(row.id)}
-                className="h-3.5 w-3.5 accent-indigo-600"
-              />
-              <span className="flex-1 text-xs font-medium text-slate-700 truncate">
-                {row.label ?? `Shelf ${i + 1}`}
-              </span>
-              <span className="text-[11px] tabular-nums text-slate-400">
-                {countFor(row.id)} placements · {Math.round(row.heightMm)}mm
-              </span>
+              <div className="flex items-center gap-2.5">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggle(row.id)}
+                  className="h-3.5 w-3.5 accent-indigo-600"
+                />
+                <span className="flex-1 text-xs font-medium text-slate-700 truncate">
+                  {row.label ?? `Shelf ${i + 1}`}
+                </span>
+                <span className="text-[11px] tabular-nums text-slate-400">
+                  {countFor(row.id)} placements · {Math.round(row.heightMm)}mm
+                </span>
+              </div>
+              <ShelfStrip row={row} placements={source.placements} />
             </label>
           );
         })}
       </div>
 
-      <div className="flex justify-end gap-2 pt-4">
+      <div className="flex items-center justify-between gap-2 pt-4">
         <Button variant="ghost" size="sm" onClick={onBack}>
           Back
         </Button>
-        <Button variant="primary" size="sm" disabled={picked.length === 0} onClick={onConfirm} className="gap-1.5">
-          <Download className="h-4 w-4" />
-          Import {picked.length} shelf{picked.length === 1 ? "" : "s"}
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={picked.length === 0}
+            onClick={() => onConfirm("replace")}
+            title="Discard everything on the canvas and start from these shelves"
+          >
+            Replace all
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={picked.length === 0 || roomLeft === 0}
+            onClick={() => onConfirm("append")}
+            className="gap-1.5"
+            title={
+              roomLeft === 0
+                ? `This planogram already has the maximum of ${MAX_INNER_SHELVES_LIMIT} shelves`
+                : "Keep the current shelves and add these below them"
+            }
+          >
+            <Download className="h-4 w-4" />
+            Add {picked.length} shelf{picked.length === 1 ? "" : "s"}
+          </Button>
+        </div>
       </div>
+      {currentShelfCount > 0 ? (
+        <p className="text-[11px] text-slate-400 text-right mt-2">
+          {roomLeft === 0
+            ? `No room left — this planogram already has ${MAX_INNER_SHELVES_LIMIT} shelves.`
+            : picked.length > roomLeft
+            ? `Only ${roomLeft} of the ${picked.length} will fit (max ${MAX_INNER_SHELVES_LIMIT} shelves).`
+            : `Adds to the ${currentShelfCount} shelf(s) already on the canvas.`}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** Miniature of one shelf's contents, drawn to scale from the placements
+ *  themselves — the source planogram's saved preview is a single image of the
+ *  whole unit, so there is nothing per-shelf to show otherwise. */
+function ShelfStrip({
+  row,
+  placements,
+}: {
+  row: import("@/lib/types").ShelfRow;
+  placements: import("@/lib/types").PlacedProduct[];
+}) {
+  const catalog = useCatalogStore((s) => s.products);
+  const mine = placements.filter((p) => p.rowId === row.id);
+
+  if (mine.length === 0) {
+    return (
+      <div className="mt-1.5 h-12 rounded border border-dashed border-slate-200 grid place-items-center text-[10px] text-slate-400">
+        Empty shelf
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-1.5 h-12 rounded border border-slate-200 bg-slate-50 relative overflow-hidden">
+      {mine.map((p) => {
+        const raw = catalog.find((c) => c.productId === p.productId);
+        const product = raw ? toEditorProduct(raw) : null;
+        const size = product ? placementSize(product, p) : null;
+        // A product that is no longer in the catalog still occupied space on the
+        // source shelf, so show a grey block rather than dropping it silently.
+        const widthPct = size ? (size.widthMm / row.widthMm) * 100 : 4;
+        const heightPct = size ? Math.min(100, (size.heightMm / row.heightMm) * 100) : 40;
+        return (
+          <div
+            key={p.instanceId}
+            className="absolute"
+            style={{
+              left: `${(p.xMm / row.widthMm) * 100}%`,
+              bottom: `${(p.yMm / row.heightMm) * 100}%`,
+              width: `${widthPct}%`,
+              height: `${heightPct}%`,
+            }}
+          >
+            {product ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={product.imageUrl}
+                alt={product.name}
+                title={product.name}
+                className="w-full h-full object-contain"
+                draggable={false}
+              />
+            ) : (
+              <div className="w-full h-full bg-slate-300 rounded-sm" />
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
