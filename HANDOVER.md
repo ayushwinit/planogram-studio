@@ -36,12 +36,16 @@ match is against the model's output, not against English.
 | Code | `github.com/ayushwinit/planogram-studio` | `master` is production |
 | Upstream | `github.com/ronith-winit/planogram-studio` | the original team's repo — **never push here** |
 | Hosting | Vercel, imported from the repo above | auto-deploys on push to `master` |
-| Database | Railway Postgres | **shared with the original team** — see §5 |
+| Database | Railway Postgres | **shared with the original team** — see §4 |
 | Object storage | Railway bucket `modular-tupperware-nvotqx` | product images + planogram previews |
 
 All secrets live in **`.env.local`** (gitignored) and in the Vercel project's
-Environment Variables. The two must be kept in sync by hand — a new variable
-added locally will not exist in production until it is pasted into Vercel.
+Environment Variables. For the handover sheet, fill in
+`DB-ACCESS.template.md`, save it as `DB-ACCESS.md` (gitignored) and send it
+privately — credentials must never be committed.
+
+`.env.local` and Vercel are kept in sync by hand: a variable added locally does
+not exist in production until it is pasted into the Vercel dashboard.
 
 Variables required: `DATABASE_URL`, `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`,
 `PGDATABASE`, `SESSION_SECRET`, `SESSION_TTL_SECONDS`, `S3_ENDPOINT`,
@@ -99,9 +103,61 @@ Splitting to our own Railway database is the outstanding piece of work: create
 the database, point `DATABASE_URL` at it, `npm run db:migrate`, recreate the
 tenant and user, re-run the importer.
 
+
 ---
 
-## 5. Where the data lives
+## 5. Database schema
+
+Postgres on Railway, 6 tables. Live row counts as of 2026-09-11.
+
+### `tenants` (2 rows)
+`tenant_id` uuid PK · `tenant_name` text · `tenant_logo` text · `created_at` · `updated_at`
+
+| `tenant_id` | `tenant_name` | products | planograms |
+| --- | --- | --- | --- |
+| `e3aa274e-7e54-40c2-bade-511393db7360` | `choithrams` | 44 | 12 |
+| `5f6ea837-10f9-479c-9839-f8ef3c256ab8` | `Choithrams (winit)` | 167 | 29 |
+
+### `tenant_users` (3 rows)
+`user_id` uuid PK · `tenant_id` uuid · `user_name` · `user_email` (globally
+unique) · `user_password` (bcrypt) · `created_at` · `updated_at`
+
+### `tenant_products` (211 rows across both tenants)
+| Column | Type | Notes |
+| --- | --- | --- |
+| `product_id` | uuid | PK |
+| `tenant_id` | uuid | **always filter on this** |
+| `category` | text NOT NULL | e.g. `CANDY`, `Evaporated Milk` |
+| `main_brand` | text | `Perfetti`, `Rainbow` — added after migration 002 |
+| `brand` | text | the **sub**-brand (`MENTOS`, `Evap`) despite the name |
+| `item_code` | text | null on all Rainbow rows |
+| `barcode` | text | null everywhere |
+| `item_description` | text NOT NULL | **the detection-model label — see §1** |
+| `uom` | text | pack size, reference only; does not drive matching |
+| `item_image_url` | text | 10-char S3 code, not a URL |
+| `item_dimensions` | jsonb | `{widthMm, heightMm, depthMm?}`, null for ~60 rows |
+
+### `planograms` (41 rows)
+`planogram_id` uuid PK · `tenant_id` · denormalised `tenant_name` / `tenant_slug`
+· `planogram_name` / `planogram_slug` · `customer_name` · `folder_id` ·
+`created_by` · counts (`shelves_count`, `rows_count`, `products_count`,
+`placements_count`, `units_count`) · `canvas_width_mm` / `canvas_height_mm` ·
+`preview_image_url` (10-char S3 code) · and the two jsonb blobs described in §6.
+
+### `planogram_folders` (6 rows)
+`folder_id` uuid PK · `tenant_id` · `parent_folder_id` (self-referencing, so
+folders nest) · `folder_name` · `created_by`
+
+### `admin_users` (1 row)
+Separate from `tenant_users`; belongs to the admin project that creates tenants.
+
+Migrations live in `db/migrations/*.sql` and are applied in filename order by
+`npm run db:migrate`. There is **no tracking table** — every statement re-runs on
+every invocation, so all of them must be idempotent.
+
+---
+
+## 6. Where the data lives
 
 **Postgres** stores structure and text. Two JSON blobs per planogram:
 
@@ -128,7 +184,7 @@ yet; worth doing before the planogram count grows.
 
 ---
 
-## 6. The catalog
+## 7. The catalog
 
 167 products under our tenant:
 
@@ -177,7 +233,7 @@ photo — deleting one product must not blank out its sibling.
 
 ---
 
-## 7. Editor features we added
+## 8. Editor features we added
 
 Beyond what the original team built:
 
@@ -206,7 +262,7 @@ Hard limit: **10 inner shelves** per unit (`MAX_INNER_SHELVES`).
 
 ---
 
-## 8. Deploying
+## 9. Deploying
 
 ```bash
 git add -A
@@ -223,12 +279,12 @@ live immediately.
 
 ---
 
-## 9. Things deliberately left undone
+## 10. Things deliberately left undone
 
 - Own database, split from the original team's (§4).
-- Preview-image compression (§5).
-- Dimensions, barcodes and the suspect measurements (§6).
-- Deleting the two junk catalog rows (§6).
+- Preview-image compression (§6).
+- Dimensions, barcodes and the suspect measurements (§7).
+- Deleting the two junk catalog rows (§7).
 - "Share of shelf %" from the client's PDF has no field in the app.
 - Folder hierarchy is undecided: mart-first (Choithrams, Carrefour) or
   brand-first (Rainbow, Perfetti).

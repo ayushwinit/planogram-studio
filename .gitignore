@@ -60,3 +60,6 @@ bucket.txt
 
 # catalog dumps — client material, never commit
 /catalog-*.json
+
+# filled-in credentials handover sheet — never commit
+DB-ACCESS.md

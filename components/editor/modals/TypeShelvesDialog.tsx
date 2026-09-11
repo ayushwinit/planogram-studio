@@ -31,8 +31,13 @@ function seedText(rowLabels: string[]): string {
 export function TypeShelvesDialog({ open, onClose }: Props) {
   const catalog = useCatalogStore((s) => s.products);
   const applyShelfPlan = useEditorStore((s) => s.applyShelfPlan);
-  const rowLabels = useEditorStore((s) =>
-    (s.planogram.shelves[0]?.rows ?? []).map((r, i) => r.label ?? `Shelf ${i + 1}`),
+  // Select the rows array (stable reference) and map outside the selector — a
+  // selector that builds a new array every call makes useSyncExternalStore loop
+  // and takes the whole editor page down.
+  const rows = useEditorStore((s) => s.planogram.shelves[0]?.rows);
+  const rowLabels = React.useMemo(
+    () => (rows ?? []).map((r, i) => r.label ?? `Shelf ${i + 1}`),
+    [rows],
   );
 
   const [text, setText] = React.useState("");
