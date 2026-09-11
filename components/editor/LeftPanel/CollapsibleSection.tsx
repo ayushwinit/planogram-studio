@@ -7,8 +7,6 @@ interface Props {
   title: string;
   count?: number;
   defaultOpen?: boolean;
-  /** When true, expands to fill remaining space (only useful for the last section). */
-  fillRemaining?: boolean;
   children: React.ReactNode;
 }
 
@@ -21,17 +19,13 @@ export function CollapsibleSection({
   title,
   count,
   defaultOpen = false,
-  fillRemaining = false,
   children,
 }: Props) {
   const [open, setOpen] = React.useState(defaultOpen);
 
   return (
     <div
-      className={cn(
-        "border-b border-slate-100 flex flex-col min-h-0",
-        open && fillRemaining && "flex-1"
-      )}
+      className="border-b border-slate-100 flex flex-col min-h-0"
     >
       <button
         type="button"
@@ -53,14 +47,7 @@ export function CollapsibleSection({
         />
       </button>
       {open ? (
-        <div
-          className={cn(
-            "px-3 pb-3 pt-1 space-y-2",
-            fillRemaining && "flex-1 min-h-0 flex flex-col"
-          )}
-        >
-          {children}
-        </div>
+        <div className="px-3 pb-3 pt-1 space-y-2">{children}</div>
       ) : null}
     </div>
   );

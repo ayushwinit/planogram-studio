@@ -72,13 +72,13 @@ export function LeftPanel() {
           </Button>
         </div>
       ) : (
-        <>
+        // One scroll for the whole panel: the filters and the product grid flow
+        // together instead of the grid owning a second, nested scrollbar.
+        <div className="flex-1 min-h-0 overflow-y-auto">
           {/* One header instead of three — the filters are used occasionally,
               the product grid is used constantly, so it gets the space. */}
           <CollapsibleSection title="Filters" defaultOpen={false}>
-            {/* Capped so opening filters on a long catalog can never push the
-                product grid off the bottom of the panel. */}
-            <div className="max-h-[40vh] overflow-y-auto space-y-3 -mx-1 px-1">
+            <div className="space-y-3">
               <FilterGroup label={`Main brands (${brandCount})`}>
                 <BrandFilter />
               </FilterGroup>
@@ -94,11 +94,10 @@ export function LeftPanel() {
             title="Products"
             count={productsCount.filtered === productsCount.total ? productsCount.filtered : undefined}
             defaultOpen
-            fillRemaining
           >
             <ProductGrid onEdit={openEdit} />
           </CollapsibleSection>
-        </>
+        </div>
       )}
 
       <CatalogItemDialog

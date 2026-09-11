@@ -10,6 +10,10 @@ interface Props {
   onEdit: (p: TenantProduct) => void;
 }
 
+/** Widest the catalog grid ever gets. Beyond five the cards stop being a quick
+ *  visual scan and the panel is stealing space from the canvas. */
+const MAX_COLUMNS = 5;
+
 function useFilteredProducts(): TenantProduct[] {
   const products = useCatalogStore((s) => s.products);
   const categoryFilter = useCatalogStore((s) => s.categoryFilter);
@@ -43,7 +47,7 @@ export function ProductGrid({ onEdit }: Props) {
 
   return (
     <>
-      <div className="relative">
+      <div className="relative sticky top-0 z-10 bg-white py-1 -my-1">
         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
         <Input
           value={search}
@@ -62,15 +66,19 @@ export function ProductGrid({ onEdit }: Props) {
         ) : null}
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto -mx-3 px-3">
+      <div>
         {filtered.length === 0 ? (
           <div className="text-xs text-slate-400 text-center py-8">No matching products.</div>
         ) : (
           <div
             className="grid gap-2"
             /* auto-fill rather than a fixed column count: widening the panel
-               fits 3, 4, 5… cards per row instead of just stretching two. */
-            style={{ gridTemplateColumns: "repeat(auto-fill, minmax(104px, 1fr))" }}
+               fits 3, 4, then 5 cards per row instead of just stretching two.
+               Five is the ceiling — past that the cards would start growing
+               again, so the columns simply get wider. */
+            style={{
+              gridTemplateColumns: `repeat(auto-fill, minmax(max(104px, ${100 / MAX_COLUMNS}%), 1fr))`,
+            }}
           >
             {filtered.map((p) => (
               <ProductCard key={p.productId} product={p} onEdit={() => onEdit(p)} />
