@@ -1,6 +1,6 @@
 "use client";
 import * as React from "react";
-import { Plus, ZoomIn, ZoomOut, Eraser, Undo2, Redo2, ChevronDown } from "lucide-react";
+import { Plus, ZoomIn, ZoomOut, Eraser, Undo2, Redo2, ChevronDown, Keyboard } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/Button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
 import { useEditorStore, MAX_INNER_SHELVES_LIMIT } from "@/lib/store/editorStore";
 import { CreateShelfModal } from "./modals/CreateShelfModal";
+import { TypeShelvesDialog } from "./modals/TypeShelvesDialog";
 import { cn } from "@/lib/cn";
 
 export function CanvasToolbar() {
@@ -35,6 +36,7 @@ export function CanvasToolbar() {
   const innerAtMax = innerCount >= MAX_INNER_SHELVES_LIMIT;
 
   const [createOpen, setCreateOpen] = React.useState(false);
+  const [typeOpen, setTypeOpen] = React.useState(false);
 
   function handlePrimary() {
     if (!hasShelf) {
@@ -137,6 +139,15 @@ export function CanvasToolbar() {
           </Tooltip>
         </div>
 
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button size="sm" variant="outline" onClick={() => setTypeOpen(true)} className="gap-1.5">
+              <Keyboard className="h-4 w-4" /> Type shelves
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Build shelves by typing product names</TooltipContent>
+        </Tooltip>
+
         {hasShelf ? (
           <span className="text-xs text-slate-500 tabular-nums">
             {innerCount} of {MAX_INNER_SHELVES_LIMIT} shelves
@@ -188,6 +199,8 @@ export function CanvasToolbar() {
           </Tooltip>
         </div>
       </div>
+
+      <TypeShelvesDialog open={typeOpen} onClose={() => setTypeOpen(false)} />
 
       <CreateShelfModal open={createOpen} onClose={() => setCreateOpen(false)} />
     </>

@@ -83,6 +83,112 @@ function renumberDefaultLabels(shelf: Shelf): void {
   });
 }
 
+/** Lay one inner shelf out: scale each stack to clear the row height, shrink
+ *  the row if it still overflows, then re-flow left-to-right with even gaps.
+ *  Mutates the placements in place and returns how many it touched. Shared by
+ *  the Auto-fit button and the text-based shelf builder, which both need the
+ *  exact same result. */
+function layoutRow(row: ShelfRow, items: PlacedProduct[]): number {
+  const catalog = useCatalogStore.getState().products;
+  let placed = 0;
+        if (items.length === 0) return 0;
+
+        const sized = items.map((p) => {
+          const raw = catalog.find((c) => c.productId === p.productId);
+          const m = raw ? arrangementMetrics(toEditorProduct(raw), p.arrangement) : null;
+          const sx = p.scaleX ?? p.scale ?? 1;
+          return {
+            p,
+            // Unscaled block size — auto-fit recomputes the scale from scratch.
+            widthMm: m?.totalWidthMm ?? 0,
+            heightMm: m?.totalHeightMm ?? 0,
+            // Current on-shelf width, only used to work out what rests on what.
+            currentWidthMm: (m?.totalWidthMm ?? 0) * sx,
+          };
+        });
+
+        // Group into stacks so a product resting on another travels with it.
+        // Bases sit on the floor; anything higher joins the base underneath its
+        // left edge, and the members are ordered bottom-up.
+        type Stack = { members: typeof sized; xMm: number };
+        const bases = sized
+          .filter((it) => it.p.yMm < 1)
+          .sort((a, b) => a.p.xMm - b.p.xMm);
+        const stacks: Stack[] = bases.map((b) => ({ members: [b], xMm: b.p.xMm }));
+        for (const it of sized.filter((x) => x.p.yMm >= 1).sort((a, b) => a.p.yMm - b.p.yMm)) {
+          // Pick the stack this one physically sits over — the widest overlap
+          // wins. Testing the left edge alone missed a wide product centred on
+          // a narrow one, whose left edge falls outside the base entirely.
+          let host: Stack | undefined;
+          let bestOverlap = 0;
+          for (const st of stacks) {
+            const left = Math.min(...st.members.map((m) => m.p.xMm));
+            const right = Math.max(...st.members.map((m) => m.p.xMm + m.currentWidthMm));
+            const overlap =
+              Math.min(right, it.p.xMm + it.currentWidthMm) - Math.max(left, it.p.xMm);
+            if (overlap > bestOverlap) {
+              bestOverlap = overlap;
+              host = st;
+            }
+          }
+          // An orphan (nothing underneath it) becomes a stack of its own and
+          // is dropped back to the floor.
+          if (host) host.members.push(it);
+          else stacks.push({ members: [it], xMm: it.p.xMm });
+        }
+        stacks.sort((a, b) => a.xMm - b.xMm);
+
+        // One scale per stack: the whole column has to clear the row height, and
+        // a shared scale keeps the products' relative sizes honest. Capped at 1
+        // so a small pack is never blown up to look like a big one.
+        const availHeightMm = Math.max(1, row.heightMm - AUTOFIT_CLEARANCE_MM);
+        const scales = stacks.map((st) => {
+          const stackHeightMm = st.members.reduce((sum, m) => sum + m.heightMm, 0);
+          return stackHeightMm > 0 ? Math.min(1, availHeightMm / stackHeightMm) : 1;
+        });
+
+        // A second, row-wide shrink if the stacks still overflow horizontally.
+        const stackWidth = (i: number) =>
+          Math.max(...stacks[i].members.map((m) => m.widthMm)) * scales[i];
+        const gapsMm = AUTOFIT_MIN_GAP_MM * (stacks.length + 1);
+        const usedMm = stacks.reduce((sum, _, i) => sum + stackWidth(i), 0);
+        if (usedMm > 0 && usedMm + gapsMm > row.widthMm) {
+          const factor = Math.max(0, row.widthMm - gapsMm) / usedMm;
+          for (let i = 0; i < scales.length; i++) {
+            scales[i] = Math.max(AUTOFIT_MIN_SCALE, scales[i] * factor);
+          }
+        }
+        for (let i = 0; i < scales.length; i++) scales[i] = Math.round(scales[i] * 100) / 100;
+
+        const finalUsedMm = stacks.reduce((sum, _, i) => sum + stackWidth(i), 0);
+        const gapMm = Math.min(
+          AUTOFIT_MAX_GAP_MM,
+          Math.max(AUTOFIT_MIN_GAP_MM, (row.widthMm - finalUsedMm) / (stacks.length + 1)),
+        );
+
+        let xMm = gapMm;
+        for (let i = 0; i < stacks.length; i++) {
+          const scale = scales[i];
+          const slotWidthMm = stackWidth(i);
+          let yMm = 0;
+          for (const m of stacks[i].members) {
+            // Narrower members sit centred on the one below rather than
+            // left-aligned, which is how a real stack looks.
+            const offsetMm = (slotWidthMm - m.widthMm * scale) / 2;
+            m.p.xMm = Math.round((xMm + offsetMm) * 100) / 100;
+            m.p.yMm = Math.round(yMm * 100) / 100;
+            m.p.scaleX = scale;
+            m.p.scaleY = scale;
+            // Legacy uniform scale would otherwise win on old placements.
+            delete m.p.scale;
+            yMm += m.heightMm * scale;
+            placed++;
+          }
+          xMm += slotWidthMm + gapMm;
+        }
+  return placed;
+}
+
 function makeInitialPlanogram(): Planogram {
   const now = new Date().toISOString();
   return {
@@ -254,6 +360,13 @@ interface EditorState {
    *  placements it touched. */
   autoFitShelf: (shelfId: string) => number;
 
+  /** Build whole shelves from a typed list. Entry i describes inner shelf i:
+   *  its products, left to right, one facing each. Existing shelves are emptied
+   *  and refilled; missing ones are created (up to MAX_INNER_SHELVES); shelves
+   *  the list doesn't mention are left alone. Laid out with the same maths as
+   *  Auto-fit, and recorded as a single undo step. Returns the shelves built. */
+  applyShelfPlan: (plan: { productIds: string[] }[]) => number;
+
   /** Snapshot the currently selected placements into the clipboard. Returns
    *  the number of entries captured (0 if no placement selection). */
   copySelectionToClipboard: () => number;
@@ -282,6 +395,10 @@ interface EditorState {
      *  applies when mode !== "fillEmpty"). */
     replaceExisting: boolean;
   }) => number;
+
+  /** Delete every placement on one inner shelf, leaving the shelf itself (and
+   *  its label, height and colours) in place. Returns how many were removed. */
+  clearRowContents: (shelfId: string, rowId: string) => number;
 
   /** Exchange the products of two inner shelves. Labels stay with the POSITION,
    *  never with the products: the top shelf is always "Shelf 1", so the saved
@@ -787,112 +904,66 @@ export const useEditorStore = create<EditorState>()(
         }
       }),
 
+    applyShelfPlan: (plan) => {
+      let built = 0;
+      set((s) => {
+        if (plan.length === 0) return;
+
+        if (s.planogram.shelves.length === 0) {
+          s.planogram.shelves.push({
+            id: nanoid(),
+            index: 0,
+            xMm: 0,
+            yMm: 0,
+            rows: [],
+            ...SHELF_DEFAULTS,
+          });
+        }
+        const shelf = s.planogram.shelves[0];
+        const wanted = Math.min(plan.length, MAX_INNER_SHELVES);
+        while (shelf.rows.length < wanted) {
+          shelf.rows.push(makeInnerShelf(shelf.rows.length, shelf.widthMm));
+        }
+        renumberDefaultLabels(shelf);
+
+        for (let i = 0; i < wanted; i++) {
+          const row = shelf.rows[i];
+          // The line describes the whole shelf, so it replaces what was there.
+          s.planogram.placements = s.planogram.placements.filter(
+            (p) => !(p.shelfId === shelf.id && p.rowId === row.id),
+          );
+          const fresh: PlacedProduct[] = plan[i].productIds.map((productId, n) => ({
+            instanceId: nanoid(),
+            productId,
+            shelfId: shelf.id,
+            rowId: row.id,
+            // Seeded in list order and spaced apart; layoutRow does the real
+            // positioning, but it sorts by x, so the order must be right here.
+            xMm: n * 1000,
+            yMm: 0,
+            arrangement: defaultArrangement(),
+            rotationDeg: 0,
+          }));
+          s.planogram.placements.push(...fresh);
+          layoutRow(row, fresh);
+          built++;
+        }
+        s.selection = { kind: "none" };
+        markEdit(s);
+      });
+      return built;
+    },
+
     autoFitShelf: (shelfId) => {
       let touched = 0;
       set((s) => {
         const shelf = s.planogram.shelves.find((sh) => sh.id === shelfId);
         if (!shelf) return;
-        const catalog = useCatalogStore.getState().products;
-
         for (const row of shelf.rows) {
-          const items = s.planogram.placements.filter(
-            (p) => p.shelfId === shelfId && p.rowId === row.id,
+          touched += layoutRow(
+            row,
+            s.planogram.placements.filter((p) => p.shelfId === shelfId && p.rowId === row.id),
           );
-          if (items.length === 0) continue;
-
-          const sized = items.map((p) => {
-            const raw = catalog.find((c) => c.productId === p.productId);
-            const m = raw ? arrangementMetrics(toEditorProduct(raw), p.arrangement) : null;
-            const sx = p.scaleX ?? p.scale ?? 1;
-            return {
-              p,
-              // Unscaled block size — auto-fit recomputes the scale from scratch.
-              widthMm: m?.totalWidthMm ?? 0,
-              heightMm: m?.totalHeightMm ?? 0,
-              // Current on-shelf width, only used to work out what rests on what.
-              currentWidthMm: (m?.totalWidthMm ?? 0) * sx,
-            };
-          });
-
-          // Group into stacks so a product resting on another travels with it.
-          // Bases sit on the floor; anything higher joins the base underneath its
-          // left edge, and the members are ordered bottom-up.
-          type Stack = { members: typeof sized; xMm: number };
-          const bases = sized
-            .filter((it) => it.p.yMm < 1)
-            .sort((a, b) => a.p.xMm - b.p.xMm);
-          const stacks: Stack[] = bases.map((b) => ({ members: [b], xMm: b.p.xMm }));
-          for (const it of sized.filter((x) => x.p.yMm >= 1).sort((a, b) => a.p.yMm - b.p.yMm)) {
-            // Pick the stack this one physically sits over — the widest overlap
-            // wins. Testing the left edge alone missed a wide product centred on
-            // a narrow one, whose left edge falls outside the base entirely.
-            let host: Stack | undefined;
-            let bestOverlap = 0;
-            for (const st of stacks) {
-              const left = Math.min(...st.members.map((m) => m.p.xMm));
-              const right = Math.max(...st.members.map((m) => m.p.xMm + m.currentWidthMm));
-              const overlap =
-                Math.min(right, it.p.xMm + it.currentWidthMm) - Math.max(left, it.p.xMm);
-              if (overlap > bestOverlap) {
-                bestOverlap = overlap;
-                host = st;
-              }
-            }
-            // An orphan (nothing underneath it) becomes a stack of its own and
-            // is dropped back to the floor.
-            if (host) host.members.push(it);
-            else stacks.push({ members: [it], xMm: it.p.xMm });
-          }
-          stacks.sort((a, b) => a.xMm - b.xMm);
-
-          // One scale per stack: the whole column has to clear the row height, and
-          // a shared scale keeps the products' relative sizes honest. Capped at 1
-          // so a small pack is never blown up to look like a big one.
-          const availHeightMm = Math.max(1, row.heightMm - AUTOFIT_CLEARANCE_MM);
-          const scales = stacks.map((st) => {
-            const stackHeightMm = st.members.reduce((sum, m) => sum + m.heightMm, 0);
-            return stackHeightMm > 0 ? Math.min(1, availHeightMm / stackHeightMm) : 1;
-          });
-
-          // A second, row-wide shrink if the stacks still overflow horizontally.
-          const stackWidth = (i: number) =>
-            Math.max(...stacks[i].members.map((m) => m.widthMm)) * scales[i];
-          const gapsMm = AUTOFIT_MIN_GAP_MM * (stacks.length + 1);
-          const usedMm = stacks.reduce((sum, _, i) => sum + stackWidth(i), 0);
-          if (usedMm > 0 && usedMm + gapsMm > row.widthMm) {
-            const factor = Math.max(0, row.widthMm - gapsMm) / usedMm;
-            for (let i = 0; i < scales.length; i++) {
-              scales[i] = Math.max(AUTOFIT_MIN_SCALE, scales[i] * factor);
-            }
-          }
-          for (let i = 0; i < scales.length; i++) scales[i] = Math.round(scales[i] * 100) / 100;
-
-          const finalUsedMm = stacks.reduce((sum, _, i) => sum + stackWidth(i), 0);
-          const gapMm = Math.min(
-            AUTOFIT_MAX_GAP_MM,
-            Math.max(AUTOFIT_MIN_GAP_MM, (row.widthMm - finalUsedMm) / (stacks.length + 1)),
-          );
-
-          let xMm = gapMm;
-          for (let i = 0; i < stacks.length; i++) {
-            const scale = scales[i];
-            const slotWidthMm = stackWidth(i);
-            let yMm = 0;
-            for (const m of stacks[i].members) {
-              // Narrower members sit centred on the one below rather than
-              // left-aligned, which is how a real stack looks.
-              const offsetMm = (slotWidthMm - m.widthMm * scale) / 2;
-              m.p.xMm = Math.round((xMm + offsetMm) * 100) / 100;
-              m.p.yMm = Math.round(yMm * 100) / 100;
-              m.p.scaleX = scale;
-              m.p.scaleY = scale;
-              // Legacy uniform scale would otherwise win on old placements.
-              delete m.p.scale;
-              yMm += m.heightMm * scale;
-              touched++;
-            }
-            xMm += slotWidthMm + gapMm;
-          }
         }
         if (touched > 0) markEdit(s);
       });
@@ -1050,6 +1121,27 @@ export const useEditorStore = create<EditorState>()(
         markEdit(s);
       });
       return created;
+    },
+
+    clearRowContents: (shelfId, rowId) => {
+      let removed = 0;
+      set((s) => {
+        const before = s.planogram.placements.length;
+        s.planogram.placements = s.planogram.placements.filter(
+          (p) => !(p.shelfId === shelfId && p.rowId === rowId),
+        );
+        removed = before - s.planogram.placements.length;
+        if (removed === 0) return;
+        // Anything selected on that shelf is gone, so the right panel must not
+        // keep pointing at it.
+        if (s.selection.kind === "placement") {
+          const alive = new Set(s.planogram.placements.map((p) => p.instanceId));
+          const next = s.selection.ids.filter((id) => alive.has(id));
+          s.selection = next.length === 0 ? { kind: "none" } : { kind: "placement", ids: next };
+        }
+        markEdit(s);
+      });
+      return removed;
     },
 
     swapRowContents: (shelfId, rowIdA, rowIdB) =>

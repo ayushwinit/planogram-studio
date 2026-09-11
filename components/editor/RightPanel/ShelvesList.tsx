@@ -12,7 +12,7 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/DropdownMenu";
 import { PropertyRow, PropertySection } from "./PropertyRow";
-import { ArrowDownToLine, ArrowUpDown, ArrowUpToLine, ChevronDown, Copy, GripVertical, Layers, MoreVertical, Plus, Trash2 } from "lucide-react";
+import { ArrowDownToLine, ArrowUpDown, ArrowUpToLine, ChevronDown, Copy, Eraser, GripVertical, Layers, MoreVertical, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { ReplicateShelfModal } from "../modals/ReplicateShelfModal";
 import { toast } from "sonner";
@@ -28,6 +28,7 @@ export function ShelvesList() {
   const placements = useEditorStore((s) => s.planogram.placements);
   const replicateRowContents = useEditorStore((s) => s.replicateRowContents);
   const swapRowContents = useEditorStore((s) => s.swapRowContents);
+  const clearRowContents = useEditorStore((s) => s.clearRowContents);
 
   const [replicateSourceRowId, setReplicateSourceRowId] = React.useState<string | null>(null);
   // Native HTML5 drag — the canvas already owns a dnd-kit context, and mixing a
@@ -180,6 +181,12 @@ export function ShelvesList() {
                   onPullFrom={(srcId, replace) => pullFrom(row.id, srcId, replace)}
                   onReplicate={() => setReplicateSourceRowId(row.id)}
                   onSwap={(otherRowId) => swapRowContents(shelfId, row.id, otherRowId)}
+                  onClear={() => {
+                    const label = row.label ?? `Shelf ${row.index + 1}`;
+                    if (!confirm(`Remove all ${rowPlacementCount} products from "${label}"?`)) return;
+                    const n = clearRowContents(shelfId, row.id);
+                    toast.success(`Cleared ${n} placement${n === 1 ? "" : "s"} from ${label}`);
+                  }}
                   canInsert={!innerAtMax}
                   onInsert={(where) =>
                     addInnerShelf(shelfId, where === "above" ? row.index : row.index + 1)
@@ -283,6 +290,7 @@ function ShelfRowMenu({
   onPullFrom,
   onReplicate,
   onSwap,
+  onClear,
   canInsert,
   onInsert,
   canDelete,
@@ -294,6 +302,7 @@ function ShelfRowMenu({
   onPullFrom: (srcRowId: string, replace: boolean) => void;
   onReplicate: () => void;
   onSwap: (otherRowId: string) => void;
+  onClear: () => void;
   /** False once the unit is at MAX_INNER_SHELVES. */
   canInsert: boolean;
   onInsert: (where: "above" | "below") => void;
@@ -483,6 +492,16 @@ function ShelfRowMenu({
           </>
         ) : null}
         <DropdownMenuSeparator />
+        <DropdownMenuItem
+          disabled={!rowHasPlacements}
+          onSelect={() => {
+            setOpen(false);
+            onClear();
+          }}
+        >
+          <Eraser className="h-3.5 w-3.5" />
+          <span className="flex-1">Clear products</span>
+        </DropdownMenuItem>
         <DropdownMenuItem
           disabled={!canDelete}
           className="text-rose-600 focus:text-rose-600"

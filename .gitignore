@@ -57,3 +57,6 @@ bucket.txt
 # perfetti product photos + import data — client material, never commit
 /perfetti_images
 /perfetti_products.json
+
+# catalog dumps — client material, never commit
+/catalog-*.json
