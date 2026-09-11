@@ -73,6 +73,16 @@ function makeInnerShelf(index: number, outerWidthMm: number, patch?: Partial<She
   };
 }
 
+/** Keep auto-generated "Shelf N" labels matching their position after an
+ *  insert, delete or reorder. A label the user typed themselves is left alone —
+ *  renaming it out from under them would be worse than a gap in the numbering. */
+function renumberDefaultLabels(shelf: Shelf): void {
+  shelf.rows.forEach((row, i) => {
+    row.index = i;
+    if (!row.label || /^Shelf \d+$/.test(row.label)) row.label = `Shelf ${i + 1}`;
+  });
+}
+
 function makeInitialPlanogram(): Planogram {
   const now = new Date().toISOString();
   return {
@@ -205,8 +215,10 @@ interface EditorState {
   setShelfTotalHeight: (id: string, totalHeightMm: number) => void;
   removeShelf: (id: string) => void;
 
-  /** Append one inner shelf to the existing outer shelf. */
-  addInnerShelf: (shelfId: string) => string | null;
+  /** Add one inner shelf. `atIndex` is the position it should occupy — 0 puts
+   *  it at the top, omitted appends to the bottom. Default "Shelf N" labels
+   *  below the insert renumber to match. */
+  addInnerShelf: (shelfId: string, atIndex?: number) => string | null;
   updateRow: (shelfId: string, rowId: string, patch: Partial<ShelfRow>) => void;
   moveRow: (shelfId: string, rowId: string, direction: "up" | "down") => void;
   removeRow: (shelfId: string, rowId: string) => void;
@@ -615,7 +627,7 @@ export const useEditorStore = create<EditorState>()(
         }
       }),
 
-    addInnerShelf: (shelfId) => {
+    addInnerShelf: (shelfId, atIndex) => {
       const shelf = get().planogram.shelves.find((sh) => sh.id === shelfId);
       if (!shelf) return null;
       if (shelf.rows.length >= MAX_INNER_SHELVES) return null;
@@ -623,7 +635,9 @@ export const useEditorStore = create<EditorState>()(
       set((s) => {
         const sh = s.planogram.shelves.find((x) => x.id === shelfId);
         if (!sh) return;
-        sh.rows.push(makeInnerShelf(sh.rows.length, sh.widthMm, { id: rowId }));
+        const at = atIndex === undefined ? sh.rows.length : Math.max(0, Math.min(atIndex, sh.rows.length));
+        sh.rows.splice(at, 0, makeInnerShelf(at, sh.widthMm, { id: rowId }));
+        renumberDefaultLabels(sh);
         markEdit(s);
       });
       return rowId;
@@ -639,7 +653,7 @@ export const useEditorStore = create<EditorState>()(
         if (newIdx < 0 || newIdx >= shelf.rows.length) return;
         const [removed] = shelf.rows.splice(idx, 1);
         shelf.rows.splice(newIdx, 0, removed);
-        shelf.rows.forEach((r, i) => (r.index = i));
+        renumberDefaultLabels(shelf);
         markEdit(s);
       }),
 
@@ -659,7 +673,7 @@ export const useEditorStore = create<EditorState>()(
         const shelf = s.planogram.shelves.find((sh) => sh.id === shelfId);
         if (!shelf) return;
         shelf.rows = shelf.rows.filter((r) => r.id !== rowId);
-        shelf.rows.forEach((r, idx) => (r.index = idx));
+        renumberDefaultLabels(shelf);
         s.planogram.placements = s.planogram.placements.filter(
           (p) => !(p.shelfId === shelfId && p.rowId === rowId)
         );

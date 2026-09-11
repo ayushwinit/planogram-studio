@@ -12,7 +12,7 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/DropdownMenu";
 import { PropertyRow, PropertySection } from "./PropertyRow";
-import { ArrowUpDown, ChevronDown, Copy, GripVertical, Layers, MoreVertical, Plus, Trash2 } from "lucide-react";
+import { ArrowDownToLine, ArrowUpDown, ArrowUpToLine, ChevronDown, Copy, GripVertical, Layers, MoreVertical, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { ReplicateShelfModal } from "../modals/ReplicateShelfModal";
 import { toast } from "sonner";
@@ -180,6 +180,10 @@ export function ShelvesList() {
                   onPullFrom={(srcId, replace) => pullFrom(row.id, srcId, replace)}
                   onReplicate={() => setReplicateSourceRowId(row.id)}
                   onSwap={(otherRowId) => swapRowContents(shelfId, row.id, otherRowId)}
+                  canInsert={!innerAtMax}
+                  onInsert={(where) =>
+                    addInnerShelf(shelfId, where === "above" ? row.index : row.index + 1)
+                  }
                   canDelete={shelf.rows.length > 1}
                   onDelete={() => {
                     const label = row.label ?? `Shelf ${row.index + 1}`;
@@ -279,6 +283,8 @@ function ShelfRowMenu({
   onPullFrom,
   onReplicate,
   onSwap,
+  canInsert,
+  onInsert,
   canDelete,
   onDelete,
 }: {
@@ -288,6 +294,9 @@ function ShelfRowMenu({
   onPullFrom: (srcRowId: string, replace: boolean) => void;
   onReplicate: () => void;
   onSwap: (otherRowId: string) => void;
+  /** False once the unit is at MAX_INNER_SHELVES. */
+  canInsert: boolean;
+  onInsert: (where: "above" | "below") => void;
   /** False for the last remaining shelf — the unit must keep at least one. */
   canDelete: boolean;
   onDelete: () => void;
@@ -443,6 +452,27 @@ function ShelfRowMenu({
         >
           <ArrowUpDown className="h-3.5 w-3.5" />
           <span className="flex-1">Swap with…</span>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          disabled={!canInsert}
+          onSelect={() => {
+            setOpen(false);
+            onInsert("above");
+          }}
+        >
+          <ArrowUpToLine className="h-3.5 w-3.5" />
+          <span className="flex-1">Insert shelf above</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!canInsert}
+          onSelect={() => {
+            setOpen(false);
+            onInsert("below");
+          }}
+        >
+          <ArrowDownToLine className="h-3.5 w-3.5" />
+          <span className="flex-1">Insert shelf below</span>
         </DropdownMenuItem>
         {!rowHasPlacements ? (
           <>

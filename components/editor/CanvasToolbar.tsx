@@ -1,10 +1,18 @@
 "use client";
 import * as React from "react";
-import { Plus, ZoomIn, ZoomOut, Eraser, Undo2, Redo2 } from "lucide-react";
+import { Plus, ZoomIn, ZoomOut, Eraser, Undo2, Redo2, ChevronDown } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@/components/ui/DropdownMenu";
 import { Button } from "@/components/ui/Button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
 import { useEditorStore, MAX_INNER_SHELVES_LIMIT } from "@/lib/store/editorStore";
 import { CreateShelfModal } from "./modals/CreateShelfModal";
+import { cn } from "@/lib/cn";
 
 export function CanvasToolbar() {
   const shelves = useEditorStore((s) => s.planogram.shelves);
@@ -36,6 +44,20 @@ export function CanvasToolbar() {
     }
   }
 
+  /** Insert positions offered in the dropdown: top, after each existing shelf,
+   *  and bottom. Numbering renumbers itself, so "after Shelf 2" really does
+   *  become the new Shelf 3. */
+  const insertPoints = outerShelf
+    ? [
+        { label: "At the top", atIndex: 0 },
+        ...outerShelf.rows.slice(0, -1).map((r, i) => ({
+          label: `After ${r.label ?? `Shelf ${i + 1}`}`,
+          atIndex: i + 1,
+        })),
+        { label: "At the bottom", atIndex: outerShelf.rows.length },
+      ]
+    : [];
+
   const primaryLabel = hasShelf ? "Add Shelf" : "Add Shelf";
   const primaryTooltip = !hasShelf
     ? "Create the shelf and choose how many shelves it has"
@@ -46,22 +68,55 @@ export function CanvasToolbar() {
   return (
     <>
       <div className="h-11 shrink-0 flex items-center gap-2 px-3 border-b border-slate-200 bg-white">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span>
-              <Button
-                size="sm"
-                variant="primary"
-                onClick={handlePrimary}
-                disabled={hasShelf && innerAtMax}
-                className="gap-1.5"
-              >
-                <Plus className="h-4 w-4" /> {primaryLabel}
-              </Button>
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>{primaryTooltip}</TooltipContent>
-        </Tooltip>
+        <div className="flex items-center">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={handlePrimary}
+                  disabled={hasShelf && innerAtMax}
+                  className={cn("gap-1.5", hasShelf && "rounded-r-none")}
+                >
+                  <Plus className="h-4 w-4" /> {primaryLabel}
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>{primaryTooltip}</TooltipContent>
+          </Tooltip>
+
+          {hasShelf ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  disabled={innerAtMax}
+                  aria-label="Choose where to add the shelf"
+                  className="rounded-l-none border-l border-white/25 px-1.5"
+                >
+                  <ChevronDown className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="min-w-[13rem]">
+                <div className="px-2 py-1 text-[10px] uppercase tracking-wider font-semibold text-slate-400">
+                  Add shelf
+                </div>
+                {insertPoints.map((pt, i) => (
+                  <React.Fragment key={pt.atIndex}>
+                    {i === insertPoints.length - 1 ? <DropdownMenuSeparator /> : null}
+                    <DropdownMenuItem
+                      onSelect={() => addInnerShelf(outerShelf.id, pt.atIndex)}
+                    >
+                      <span className="flex-1">{pt.label}</span>
+                    </DropdownMenuItem>
+                  </React.Fragment>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
+        </div>
 
         <div className="flex items-center gap-0.5 rounded-md border border-slate-200 bg-white">
           <Tooltip>
