@@ -73,14 +73,22 @@ export function LeftPanel() {
         </div>
       ) : (
         <>
-          <CollapsibleSection title="Main Brands" count={brandCount} defaultOpen={false}>
-            <BrandFilter />
-          </CollapsibleSection>
-          <CollapsibleSection title="Sub Brands" count={subBrandCount} defaultOpen={false}>
-            <SubBrandFilter />
-          </CollapsibleSection>
-          <CollapsibleSection title="Categories" count={categoryCount} defaultOpen={false}>
-            <CategoryFilter />
+          {/* One header instead of three — the filters are used occasionally,
+              the product grid is used constantly, so it gets the space. */}
+          <CollapsibleSection title="Filters" defaultOpen={false}>
+            {/* Capped so opening filters on a long catalog can never push the
+                product grid off the bottom of the panel. */}
+            <div className="max-h-[40vh] overflow-y-auto space-y-3 -mx-1 px-1">
+              <FilterGroup label={`Main brands (${brandCount})`}>
+                <BrandFilter />
+              </FilterGroup>
+              <FilterGroup label={`Sub brands (${subBrandCount})`}>
+                <SubBrandFilter />
+              </FilterGroup>
+              <FilterGroup label={`Categories (${categoryCount})`}>
+                <CategoryFilter />
+              </FilterGroup>
+            </div>
           </CollapsibleSection>
           <CollapsibleSection
             title="Products"
@@ -102,3 +110,13 @@ export function LeftPanel() {
   );
 }
 
+function FilterGroup({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1.5">
+      <div className="text-[10px] uppercase tracking-wider font-semibold text-slate-400">
+        {label}
+      </div>
+      {children}
+    </div>
+  );
+}

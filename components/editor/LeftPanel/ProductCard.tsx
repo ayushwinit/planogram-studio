@@ -4,6 +4,8 @@ import { useDraggable } from "@dnd-kit/core";
 import { Pencil, Image as ImageIcon } from "lucide-react";
 import type { TenantProduct } from "@/lib/catalog/types";
 import { brandAccentColor } from "@/lib/store/catalogStore";
+import { useEditorStore } from "@/lib/store/editorStore";
+import { toast } from "sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
 import { cn } from "@/lib/cn";
 
@@ -13,6 +15,8 @@ interface Props {
 }
 
 export function ProductCard({ product, onEdit }: Props) {
+  const placeProduct = useEditorStore((s) => s.placeProductOnSelectedRow);
+
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `product:${product.productId}`,
     data: { kind: "product", productId: product.productId },
@@ -29,6 +33,14 @@ export function ProductCard({ product, onEdit }: Props) {
           ref={setNodeRef}
           {...listeners}
           {...attributes}
+          onClick={() => {
+            // Click drops it on the selected shelf; drag is still there for
+            // aiming at a specific shelf and spot.
+            if (!placeProduct(product.productId)) {
+              toast.error("Add a shelf first");
+            }
+          }}
+          title="Click to place on the selected shelf, or drag onto one"
           className={cn(
             "group relative rounded-lg border border-slate-200 bg-white p-2 hover:border-indigo-300 hover:shadow-sm transition-all cursor-grab active:cursor-grabbing text-left",
             isDragging && "opacity-30"

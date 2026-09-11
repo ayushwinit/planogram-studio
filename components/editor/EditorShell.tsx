@@ -23,7 +23,6 @@ import { CanvasToolbar } from "./CanvasToolbar";
 import { LeftPanel } from "./LeftPanel/LeftPanel";
 import { Canvas } from "./Canvas/Canvas";
 import { RightPanel } from "./RightPanel/RightPanel";
-import { PlaceProductModal, type PendingPlacement } from "./modals/PlaceProductModal";
 import { TooltipProvider } from "@/components/ui/Tooltip";
 import { ProductCardPreview } from "./LeftPanel/ProductCardPreview";
 import { toast } from "sonner";
@@ -78,7 +77,6 @@ export default function EditorShell({
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
-  const [pending, setPending] = React.useState<PendingPlacement | null>(null);
   const [activeDrag, setActiveDrag] = React.useState<{
     kind: "product" | "placement";
     productId?: string;
@@ -169,7 +167,10 @@ export default function EditorShell({
     if (activeData.kind === "product") {
       const product = getProduct(activeData.productId);
       if (!product) return;
-      setPending({
+      // Straight onto the shelf — quantity and arrangement are tuned in the
+      // right panel, which opens on the new placement because addPlacement
+      // selects it.
+      addPlacement({
         productId: product.id,
         shelfId: overData.shelfId,
         rowId: overData.rowId,
@@ -421,23 +422,6 @@ export default function EditorShell({
             </div>
           ) : null}
         </DragOverlay>
-
-        <PlaceProductModal
-          pending={pending}
-          onClose={() => setPending(null)}
-          onConfirm={(p) => {
-            addPlacement({
-              productId: p.productId,
-              shelfId: p.shelfId,
-              rowId: p.rowId,
-              xMm: p.xMm,
-              yMm: p.yMm,
-              arrangement: p.arrangement,
-              rotationDeg: p.rotationDeg,
-            });
-            setPending(null);
-          }}
-        />
 
         <PlacementContextMenu />
       </DndContext>

@@ -66,7 +66,12 @@ export function ProductGrid({ onEdit }: Props) {
         {filtered.length === 0 ? (
           <div className="text-xs text-slate-400 text-center py-8">No matching products.</div>
         ) : (
-          <div className="grid grid-cols-2 gap-2">
+          <div
+            className="grid gap-2"
+            /* auto-fill rather than a fixed column count: widening the panel
+               fits 3, 4, 5… cards per row instead of just stretching two. */
+            style={{ gridTemplateColumns: "repeat(auto-fill, minmax(104px, 1fr))" }}
+          >
             {filtered.map((p) => (
               <ProductCard key={p.productId} product={p} onEdit={() => onEdit(p)} />
             ))}

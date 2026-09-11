@@ -11,7 +11,7 @@ import type {
   ShelfRow,
   PlacedProduct,
 } from "../types";
-import { arrangementMetrics } from "../arrangement";
+import { arrangementMetrics, defaultArrangement } from "../arrangement";
 import { useCatalogStore, toEditorProduct } from "./catalogStore";
 
 // Canvas size is dynamic and derived from the shelf bounding box at render time
@@ -220,6 +220,11 @@ interface EditorState {
     arrangement: Arrangement;
     rotationDeg?: 0 | 90 | 180 | 270;
   }) => string;
+  /** Drop a product onto the shelf without the user aiming: it lands on the
+   *  selected shelf (or the first one), to the right of whatever is already
+   *  there, and ends up selected so the right panel opens on it. Returns null
+   *  when there is no shelf to place on. */
+  placeProductOnSelectedRow: (productId: string) => string | null;
   updatePlacement: (id: string, patch: Partial<PlacedProduct>) => void;
   movePlacement: (
     id: string,
@@ -678,6 +683,51 @@ export const useEditorStore = create<EditorState>()(
         s.selection = { kind: "placement", ids: [instanceId] };
       });
       return instanceId;
+    },
+
+    placeProductOnSelectedRow: (productId) => {
+      const state = get();
+      const shelf = state.planogram.shelves[0];
+      if (!shelf) return null;
+
+      // Whatever the user last clicked wins: a selected shelf, or the shelf of a
+      // selected placement. Otherwise the first shelf.
+      const sel = state.selection;
+      let rowId: RowSlot | null = null;
+      if (sel.kind === "row" && sel.shelfId === shelf.id) rowId = sel.id;
+      else if (sel.kind === "placement" && sel.ids.length > 0) {
+        rowId = state.planogram.placements.find((p) => p.instanceId === sel.ids[0])?.rowId ?? null;
+      }
+      if (!rowId) rowId = shelf.rows[0]?.id ?? null;
+      if (!rowId) return null;
+
+      const row = shelf.rows.find((r) => r.id === rowId);
+      const arrangement = defaultArrangement();
+
+      // Park it just past the rightmost thing on that shelf so it never lands
+      // on top of existing stock; wrap back to the left once the shelf is full.
+      const occupied = state.planogram.placements.filter(
+        (p) => p.shelfId === shelf.id && p.rowId === rowId,
+      );
+      let xMm = 20;
+      for (const p of occupied) {
+        xMm = Math.max(xMm, p.xMm + footprintWidthMm(p) + 10);
+      }
+      const raw = useCatalogStore.getState().products.find((c) => c.productId === productId);
+      const widthMm = raw
+        ? arrangementMetrics(toEditorProduct(raw), arrangement).totalWidthMm
+        : 0;
+      if (row && xMm + widthMm > row.widthMm) xMm = 20;
+
+      return get().addPlacement({
+        productId,
+        shelfId: shelf.id,
+        rowId,
+        xMm,
+        yMm: 0,
+        arrangement,
+        rotationDeg: 0,
+      });
     },
 
     updatePlacement: (id, patch) =>

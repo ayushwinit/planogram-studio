@@ -555,7 +555,7 @@ function ShelfPicker({
   }
 
   return (
-    <div className="max-w-lg mx-auto">
+    <div className="max-w-3xl mx-auto">
       <div className="flex items-center justify-between gap-3 mb-3">
         <div className="min-w-0">
           <h3 className="text-sm font-medium text-slate-900 truncate">{sourceName}</h3>
@@ -664,14 +664,19 @@ function ShelfStrip({
 
   if (mine.length === 0) {
     return (
-      <div className="mt-1.5 h-12 rounded border border-dashed border-slate-200 grid place-items-center text-[10px] text-slate-400">
+      <div className="mt-1.5 h-16 rounded border border-dashed border-slate-200 grid place-items-center text-[10px] text-slate-400">
         Empty shelf
       </div>
     );
   }
 
   return (
-    <div className="mt-1.5 h-12 rounded border border-slate-200 bg-slate-50 relative overflow-hidden">
+    <div
+      className="mt-1.5 rounded border border-slate-200 bg-slate-50 relative overflow-hidden"
+      /* Drawn at the shelf's true proportions so a 959x120mm shelf looks like
+         one, with a floor so a very wide shelf doesn't collapse to a smear. */
+      style={{ aspectRatio: `${row.widthMm} / ${row.heightMm}`, minHeight: 64 }}
+    >
       {mine.map((p) => {
         const raw = catalog.find((c) => c.productId === p.productId);
         const product = raw ? toEditorProduct(raw) : null;

@@ -40,14 +40,14 @@ export function PlacementProperties({ placementId }: { placementId: string }) {
     if (!placement) return;
     let next: Arrangement;
     if (kind === "horizontal") {
-      next = { kind: "horizontal", count: arr.kind === "horizontal" || arr.kind === "stacked" ? arr.count : 4, gapMm: arr.gapMm ?? 2 };
+      next = { kind: "horizontal", count: arr.kind === "horizontal" || arr.kind === "stacked" ? arr.count : 1, gapMm: arr.gapMm ?? 2 };
     } else if (kind === "stacked") {
-      next = { kind: "stacked", count: arr.kind === "horizontal" || arr.kind === "stacked" ? arr.count : 3, gapMm: arr.gapMm ?? 2 };
+      next = { kind: "stacked", count: arr.kind === "horizontal" || arr.kind === "stacked" ? arr.count : 1, gapMm: arr.gapMm ?? 2 };
     } else {
       next = {
         kind: "grid",
-        cols: arr.kind === "grid" ? arr.cols : 3,
-        rows: arr.kind === "grid" ? arr.rows : 2,
+        cols: arr.kind === "grid" ? arr.cols : 1,
+        rows: arr.kind === "grid" ? arr.rows : 1,
         gapMm: arr.gapMm ?? 2,
       };
     }

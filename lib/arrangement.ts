@@ -54,5 +54,6 @@ export function arrangementMetrics(product: Product, arrangement: Arrangement): 
 }
 
 export function defaultArrangement(): Arrangement {
-  return { kind: "horizontal", count: 4, gapMm: 2 };
+  // One facing. The user grows it from the right panel once it's on the shelf.
+  return { kind: "horizontal", count: 1, gapMm: 2 };
 }
