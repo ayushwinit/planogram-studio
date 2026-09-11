@@ -86,7 +86,9 @@ export function RightPanel() {
   }
 
   return (
-    <aside className="h-full bg-white border-l border-slate-200 flex flex-col">
+    // One scroll for the whole panel — the planogram fields, the shelves list
+    // and the selection properties all move together, like the catalog panel.
+    <aside className="h-full bg-white border-l border-slate-200 flex flex-col overflow-y-auto">
       <div className="px-3 py-2.5 border-b border-slate-200 space-y-2.5 bg-white">
         <div className="space-y-1">
           <Label htmlFor="planogram-name">Planogram</Label>
@@ -195,14 +197,14 @@ export function RightPanel() {
         </div>
       </div>
 
-      <div className="px-4 h-11 shrink-0 flex items-center gap-2 border-b border-slate-100">
+      <div className="px-4 h-11 shrink-0 flex items-center gap-2 border-b border-slate-100 sticky top-0 z-10 bg-white">
         <Sliders className="h-4 w-4 text-slate-500" />
         <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
           {sectionTitle}
         </h2>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto">
+      <div>
         <ShelvesListSafe />
 
         {selection.kind === "shelf" ? (

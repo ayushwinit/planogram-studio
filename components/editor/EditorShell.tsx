@@ -385,7 +385,7 @@ export default function EditorShell({
           <Toolbar user={user} tenant={tenant} />
           <div className="flex-1 min-h-0">
             <PanelGroup orientation="horizontal" className="h-full">
-              <Panel id="left" defaultSize="20%" minSize="14%" maxSize="35%">
+              <Panel id="left" defaultSize="20%" minSize="14%" maxSize="42%">
                 <LeftPanel />
               </Panel>
               <PanelResizeHandle className="resize-handle-h" />

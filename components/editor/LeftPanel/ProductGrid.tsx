@@ -13,6 +13,8 @@ interface Props {
 /** Widest the catalog grid ever gets. Beyond five the cards stop being a quick
  *  visual scan and the panel is stealing space from the canvas. */
 const MAX_COLUMNS = 5;
+/** Matches the `gap-2` on the grid (0.5rem). */
+const GRID_GAP_PX = 8;
 
 function useFilteredProducts(): TenantProduct[] {
   const products = useCatalogStore((s) => s.products);
@@ -77,7 +79,12 @@ export function ProductGrid({ onEdit }: Props) {
                Five is the ceiling — past that the cards would start growing
                again, so the columns simply get wider. */
             style={{
-              gridTemplateColumns: `repeat(auto-fill, minmax(max(104px, ${100 / MAX_COLUMNS}%), 1fr))`,
+              // The exact width of one of five columns, gaps subtracted — a
+              // bare 20% ignores the gaps and auto-fill can then only ever fit
+              // four.
+              gridTemplateColumns: `repeat(auto-fill, minmax(max(104px, calc((100% - ${
+                (MAX_COLUMNS - 1) * GRID_GAP_PX
+              }px) / ${MAX_COLUMNS})), 1fr))`,
             }}
           >
             {filtered.map((p) => (
