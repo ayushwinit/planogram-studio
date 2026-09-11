@@ -53,7 +53,23 @@ export function arrangementMetrics(product: Product, arrangement: Arrangement): 
   };
 }
 
+/** Upper bound on facings in a single placement. Mirrors the Quantity input's
+ *  cap in RightPanel/PlacementProperties, so a typed count can never exceed
+ *  what the user is then able to edit back down. */
+export const MAX_FACINGS = 50;
+
+/** Gap between the facings of one placement. */
+const DEFAULT_GAP_MM = 2;
+
 export function defaultArrangement(): Arrangement {
   // One facing. The user grows it from the right panel once it's on the shelf.
-  return { kind: "horizontal", count: 1, gapMm: 2 };
+  return { kind: "horizontal", count: 1, gapMm: DEFAULT_GAP_MM };
+}
+
+/** One placement holding `count` facings side by side — what a repeated product
+ *  name (or an explicit `NAME x4`) in the shelf builder collapses to, so the
+ *  saved JSON carries one entry per SKU run instead of one entry per facing. */
+export function facingsArrangement(count: number): Arrangement {
+  const n = Math.min(MAX_FACINGS, Math.max(1, Math.floor(count)));
+  return { kind: "horizontal", count: n, gapMm: DEFAULT_GAP_MM };
 }

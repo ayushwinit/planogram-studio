@@ -11,7 +11,7 @@ import type {
   ShelfRow,
   PlacedProduct,
 } from "../types";
-import { arrangementMetrics, defaultArrangement } from "../arrangement";
+import { arrangementMetrics, defaultArrangement, facingsArrangement } from "../arrangement";
 import { useCatalogStore, toEditorProduct } from "./catalogStore";
 
 // Canvas size is dynamic and derived from the shelf bounding box at render time
@@ -361,11 +361,14 @@ interface EditorState {
   autoFitShelf: (shelfId: string) => number;
 
   /** Build whole shelves from a typed list. Entry i describes inner shelf i:
-   *  its products, left to right, one facing each. Existing shelves are emptied
-   *  and refilled; missing ones are created (up to MAX_INNER_SHELVES); shelves
-   *  the list doesn't mention are left alone. Laid out with the same maths as
+   *  its products, left to right, with the facings asked for. Consecutive
+   *  entries for the same product collapse into ONE placement carrying the
+   *  total as its arrangement count, so `shelf_details` holds one object per
+   *  SKU run rather than one per facing. Existing shelves are emptied and
+   *  refilled; missing ones are created (up to MAX_INNER_SHELVES); shelves the
+   *  list doesn't mention are left alone. Laid out with the same maths as
    *  Auto-fit, and recorded as a single undo step. Returns the shelves built. */
-  applyShelfPlan: (plan: { productIds: string[] }[]) => number;
+  applyShelfPlan: (plan: { items: { productId: string; qty: number }[] }[]) => number;
 
   /** Snapshot the currently selected placements into the clipboard. Returns
    *  the number of entries captured (0 if no placement selection). */
@@ -932,16 +935,28 @@ export const useEditorStore = create<EditorState>()(
           s.planogram.placements = s.planogram.placements.filter(
             (p) => !(p.shelfId === shelf.id && p.rowId === row.id),
           );
-          const fresh: PlacedProduct[] = plan[i].productIds.map((productId, n) => ({
+          // Merge neighbouring facings of the same SKU into one run. Only
+          // CONSECUTIVE entries merge: `A, B, A` stays three placements,
+          // because the gap between the two A's is part of the layout the
+          // user described.
+          const runs: { productId: string; qty: number }[] = [];
+          for (const item of plan[i].items) {
+            const last = runs[runs.length - 1];
+            if (last && last.productId === item.productId) last.qty += item.qty;
+            else runs.push({ productId: item.productId, qty: item.qty });
+          }
+
+          const fresh: PlacedProduct[] = runs.map((run, n) => ({
             instanceId: nanoid(),
-            productId,
+            productId: run.productId,
             shelfId: shelf.id,
             rowId: row.id,
             // Seeded in list order and spaced apart; layoutRow does the real
             // positioning, but it sorts by x, so the order must be right here.
             xMm: n * 1000,
             yMm: 0,
-            arrangement: defaultArrangement(),
+            // One placement, `qty` facings — not `qty` placements.
+            arrangement: facingsArrangement(run.qty),
             rotationDeg: 0,
           }));
           s.planogram.placements.push(...fresh);

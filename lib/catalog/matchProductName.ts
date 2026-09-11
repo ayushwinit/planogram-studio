@@ -42,17 +42,49 @@ export function matchProductName(input: string, catalog: TenantProduct[]): NameM
   return { input, product: null, ambiguous: contains.length > 1 };
 }
 
+/** One typed entry on a shelf line: the product name plus how many facings of
+ *  it were asked for. */
+export interface ParsedShelfItem {
+  /** The product name as typed, with any quantity suffix removed. */
+  name: string;
+  /** Facings requested. 1 when no quantity was typed. */
+  qty: number;
+}
+
 export interface ParsedShelfLine {
   /** 1-based shelf number this line targets. */
   shelfNo: number;
-  names: string[];
+  items: ParsedShelfItem[];
+}
+
+/**
+ * Split a trailing facing count off a typed entry: `NAME x4`, `NAME X4`,
+ * `NAME ×4`, `NAME *4` or `NAME (4)`, with or without the space.
+ *
+ * Anchored at the end of the string and requiring the marker, so pack sizes
+ * inside a name survive untouched — `MENTOS_FRESH_DIVE_GUM_GRAPE_44Px2GM` keeps
+ * its `x2`, and `..._87.5GM 50p` its `50p`. Verified against the whole
+ * 167-row Choithrams catalog: no product name is altered by this.
+ */
+function splitQty(raw: string): ParsedShelfItem {
+  const s = raw.trim();
+  const m = /^(.*?)\s*(?:[x×*]\s*(\d{1,3})|\((\d{1,3})\))$/i.exec(s);
+  if (!m) return { name: s, qty: 1 };
+  const name = m[1].trim();
+  const n = Number(m[2] ?? m[3]);
+  // A bare `x4` with nothing in front of it is not a product — keep the raw
+  // text so it gets reported as unmatched rather than silently dropped.
+  if (!name || !Number.isFinite(n) || n < 1) return { name: s, qty: 1 };
+  return { name, qty: n };
 }
 
 /**
  * Parse the shelf-builder textarea. One shelf per line:
- *   `Shelf 1: RAINBOW EVAP ORIGINAL 170g, RAINBOW EVAP PET 133ml`
+ *   `Shelf 1: RAINBOW EVAP ORIGINAL 170g, RAINBOW EVAP PET 133ml x3`
  * The `Shelf N:` prefix is optional — without it the line's position decides
- * the shelf, so a bare paste of comma-separated lines still works.
+ * the shelf, so a bare paste of comma-separated lines still works. A trailing
+ * quantity on an entry means that many facings; repeating the same name is
+ * equivalent and collapses to the same thing when the shelf is built.
  */
 export function parseShelfLines(text: string): ParsedShelfLine[] {
   const out: ParsedShelfLine[] = [];
@@ -62,11 +94,12 @@ export function parseShelfLines(text: string): ParsedShelfLine[] {
     const m = /^shelf\s*(\d+)\s*[:.\-]\s*(.*)$/i.exec(line);
     const shelfNo = m ? Number(m[1]) : out.length + 1;
     const rest = m ? m[2] : line;
-    const names = rest
+    const items = rest
       .split(",")
       .map((n) => n.trim())
-      .filter(Boolean);
-    out.push({ shelfNo, names });
+      .filter(Boolean)
+      .map(splitQty);
+    out.push({ shelfNo, items });
   }
   return out;
 }

@@ -54,11 +54,17 @@ export function TypeShelvesDialog({ open, onClose }: Props) {
   const parsed = React.useMemo(() => {
     return parseShelfLines(text).map((line) => ({
       ...line,
-      matches: line.names.map((n) => matchProductName(n, catalog)),
+      // Carry the typed facing count alongside the match so the preview and
+      // the built shelf agree on quantity.
+      matches: line.items.map((it) => ({ ...matchProductName(it.name, catalog), qty: it.qty })),
     }));
   }, [text, catalog]);
 
   const resolved = parsed.reduce((n, l) => n + l.matches.filter((m) => m.product).length, 0);
+  const facings = parsed.reduce(
+    (n, l) => n + l.matches.reduce((k, m) => k + (m.product ? m.qty : 0), 0),
+    0,
+  );
   const failed = parsed.flatMap((l) => l.matches.filter((m) => !m.product));
   const overflow = Math.max(0, parsed.length - MAX_INNER_SHELVES_LIMIT);
 
@@ -66,9 +72,11 @@ export function TypeShelvesDialog({ open, onClose }: Props) {
     const plan = parsed
       .slice(0, MAX_INNER_SHELVES_LIMIT)
       .map((l) => ({
-        productIds: l.matches.flatMap((m) => (m.product ? [m.product.productId] : [])),
+        items: l.matches.flatMap((m) =>
+          m.product ? [{ productId: m.product.productId, qty: m.qty }] : [],
+        ),
       }));
-    if (plan.every((p) => p.productIds.length === 0)) {
+    if (plan.every((p) => p.items.length === 0)) {
       toast.error("Nothing to place", { description: "No product names matched the catalog." });
       return;
     }
@@ -78,7 +86,11 @@ export function TypeShelvesDialog({ open, onClose }: Props) {
         description: failed.map((f) => f.input).join(", "),
       });
     } else {
-      toast.success(`Built ${built} shelf${built === 1 ? "" : "s"} with ${resolved} products`);
+      toast.success(
+        `Built ${built} shelf${built === 1 ? "" : "s"} with ${resolved} product${
+          resolved === 1 ? "" : "s"
+        }, ${facings} facing${facings === 1 ? "" : "s"}`,
+      );
     }
     onClose();
   }
@@ -89,8 +101,10 @@ export function TypeShelvesDialog({ open, onClose }: Props) {
         <DialogHeader>
           <DialogTitle>Type shelves</DialogTitle>
           <DialogDescription>
-            One shelf per line, products left to right, separated by commas. Each name is one
-            facing. Existing shelves are refilled; missing ones are created.
+            One shelf per line, products left to right, separated by commas. Add{" "}
+            <span className="font-mono">x4</span> after a name for four facings — or just repeat
+            the name, which comes to the same thing. Neighbouring facings of one product become a
+            single placement. Existing shelves are refilled; missing ones are created.
           </DialogDescription>
         </DialogHeader>
 
@@ -99,7 +113,7 @@ export function TypeShelvesDialog({ open, onClose }: Props) {
           onChange={(e) => setText(e.target.value)}
           spellCheck={false}
           rows={8}
-          placeholder={"Shelf 1: RAINBOW EVAP ORIGINAL 170g, RAINBOW EVAP PET 133ml\nShelf 2: RAINBOW MILK POWDER 400g, RAINBOW MILK POWDER 900g"}
+          placeholder={"Shelf 1: RAINBOW EVAP ORIGINAL 170g x4, RAINBOW EVAP PET 133ml x2\nShelf 2: RAINBOW MILK POWDER 400g, RAINBOW MILK POWDER 900g"}
           className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-mono leading-6 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
         />
 
@@ -145,6 +159,9 @@ export function TypeShelvesDialog({ open, onClose }: Props) {
                         <AlertTriangle className="h-3 w-3" />
                       )}
                       {m.product ? m.product.itemDescription : m.input}
+                      {m.product && m.qty > 1 ? (
+                        <span className="font-semibold tabular-nums">×{m.qty}</span>
+                      ) : null}
                     </span>
                   ))}
                 </div>
@@ -155,7 +172,7 @@ export function TypeShelvesDialog({ open, onClose }: Props) {
 
         <DialogFooter>
           <span className="mr-auto self-center text-[11px] text-slate-500">
-            {resolved} matched
+            {resolved} matched · {facings} facing{facings === 1 ? "" : "s"}
             {failed.length > 0 ? ` · ${failed.length} will be skipped` : ""}
             {overflow > 0 ? ` · ${overflow} line(s) over the ${MAX_INNER_SHELVES_LIMIT}-shelf limit` : ""}
           </span>
