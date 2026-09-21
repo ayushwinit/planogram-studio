@@ -11,7 +11,6 @@ import {
   Box,
   Trash2,
   ImageIcon,
-  Calendar,
   X,
   SlidersHorizontal,
   Loader2,
@@ -47,19 +46,6 @@ const EMPTY_FILTERS: FilterValues = {
   mainBrand: "",
   subBrand: "",
 };
-
-function formatRelative(iso: string): string {
-  const then = new Date(iso).getTime();
-  const diff = Date.now() - then;
-  const min = 60_000;
-  const hr = 60 * min;
-  const day = 24 * hr;
-  if (diff < min) return "just now";
-  if (diff < hr) return `${Math.floor(diff / min)}m ago`;
-  if (diff < day) return `${Math.floor(diff / hr)}h ago`;
-  if (diff < 30 * day) return `${Math.floor(diff / day)}d ago`;
-  return new Date(iso).toLocaleDateString();
-}
 
 function buildQueryString(values: FilterValues, folderId: string | null): string {
   const params = new URLSearchParams();
@@ -645,9 +631,6 @@ function PlanogramCard({
           </span>
           <span className="inline-flex items-center gap-1">
             <Box className="h-3.5 w-3.5" /> {p.unitsCount}
-          </span>
-          <span className="ml-auto inline-flex items-center gap-1">
-            <Calendar className="h-3.5 w-3.5" /> {formatRelative(p.updatedAt)}
           </span>
         </div>
 
